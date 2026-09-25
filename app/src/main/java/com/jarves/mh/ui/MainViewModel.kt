@@ -30,6 +30,7 @@ import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.WorkspaceEntry
 import com.jarves.mh.model.projectSlug
+import com.jarves.mh.model.stripEmojis
 import com.jarves.mh.model.generateQuickChatIdentity
 import com.jarves.mh.model.providerProtocolForAgent
 import com.jarves.mh.network.ConnectionValidation
