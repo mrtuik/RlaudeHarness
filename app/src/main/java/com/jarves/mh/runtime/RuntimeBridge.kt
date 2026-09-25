@@ -26,6 +26,7 @@ interface RuntimeBridge {
         projectName: String = projectSlug,
     ): String
     suspend fun respondToApproval(request: ToolRequest, approved: Boolean)
+    suspend fun stopSession(sessionId: String)
     suspend fun stopActiveSession()
     suspend fun undoLastChanges(projectId: String): Boolean
     suspend fun acceptLastChanges(projectId: String)
