@@ -4502,6 +4502,7 @@ private fun WorkspaceScreen(
                         selectedTab = WorkspaceTab.FILES
                         onRefreshFiles()
                     },
+                    onOpenFile = onOpenFile,
                     onAddAttachments = onAddAttachments,
                     onEditMessage = onEditMessage,
                     onAddTextAttachment = onAddTextAttachment,
@@ -5285,6 +5286,7 @@ private fun ChatTab(
     projectSlug: String = "project",
     onDownloadZip: (List<String>, String) -> Unit = { _, _ -> },
     onRenameAttachment: (String, String) -> Unit = { _, _ -> },
+    onOpenFile: (WorkspaceEntry) -> Unit = {},
 ) {
     val view = LocalView.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -5319,6 +5321,20 @@ private fun ChatTab(
     var viewingTextAttachment by remember { mutableStateOf<ChatAttachment?>(null) }
     var viewingImageAttachment by remember { mutableStateOf<ChatAttachment?>(null) }
     var viewingImageAllowMarkup by remember { mutableStateOf(false) }
+    val onOpenChangedFile: (String) -> Unit = { path ->
+        val ext = path.substringAfterLast('.', "").lowercase()
+        if (ext in setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg")) {
+            viewingImageAllowMarkup = false
+            viewingImageAttachment = ChatAttachment(
+                displayName = path.substringAfterLast('/'),
+                relativePath = path,
+                mimeType = "image/$ext",
+                sizeBytes = 0L,
+            )
+        } else {
+            onOpenFile(WorkspaceEntry(path = path, name = path.substringAfterLast('/'), isDirectory = false, depth = 0))
+        }
+    }
     val displayMessages = remember(messages) {
         messages.filterNot { !it.fromUser && it.text.startsWith("Hi! Tell me") }
     }
@@ -5368,7 +5384,7 @@ private fun ChatTab(
                 ) {
                     itemsIndexed(displayMessages, key = { _, message -> message.id }) { index, message ->
                         if (message.workItems.isNotEmpty()) {
-                            WorkBlockCard(message, projectSlug, onOpenFiles, onDownloadZip)
+                            WorkBlockCard(message, projectSlug, onOpenFiles, onDownloadZip, onOpenChangedFile)
                         }
                         if (message.text.isNotBlank() || (message.workItems.isEmpty() && message.fromUser)) {
                             MessageBubble(
@@ -5430,6 +5446,7 @@ private fun ChatTab(
                                     changedPaths = turnChangedPaths,
                                     projectSlug = projectSlug,
                                     onDownloadZip = onDownloadZip,
+                                    onOpenChangedFile = onOpenChangedFile,
                                 )
                             }
                         }
@@ -6736,6 +6753,7 @@ private fun WorkBlockCard(
     projectSlug: String = "project",
     onOpenFiles: () -> Unit = {},
     onDownloadZip: (List<String>, String) -> Unit = { _, _ -> },
+    onOpenChangedFile: (String) -> Unit = {},
 ) {
     val seconds = (message.workedMillis / 1_000L).coerceAtLeast(1L)
     val changedPaths = remember(message.id, message.workItems, message.changedFiles) {
@@ -6816,7 +6834,7 @@ private fun WorkBlockCard(
                     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
                         changedPaths.forEach { path ->
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                modifier = Modifier.fillMaxWidth().clickable { onOpenChangedFile(path) }.padding(vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Icon(
@@ -6849,6 +6867,7 @@ private fun TurnCompletionSummaryCard(
     changedPaths: List<String>,
     projectSlug: String = "project",
     onDownloadZip: (List<String>, String) -> Unit = { _, _ -> },
+    onOpenChangedFile: (String) -> Unit = {},
 ) {
     var showTreeSheet by rememberSaveable { mutableStateOf(false) }
     val zipFileName = remember(projectSlug) { "${projectSlug}-changes.zip" }
@@ -6913,6 +6932,10 @@ private fun TurnCompletionSummaryCard(
                 onDownloadZip(changedPaths, zipFileName)
             },
             onDismiss = { showTreeSheet = false },
+            onOpenChangedFile = { path ->
+                showTreeSheet = false
+                onOpenChangedFile(path)
+            },
         )
     }
 }
@@ -6924,6 +6947,7 @@ private fun ZipContentsSheet(
     changedPaths: List<String>,
     onDownload: () -> Unit,
     onDismiss: () -> Unit,
+    onOpenChangedFile: (String) -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val groupedByDir = remember(changedPaths) { groupChangedPathsByDirectory(changedPaths) }
@@ -6998,6 +7022,7 @@ private fun ZipContentsSheet(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             group.fileNames.forEach { fileName ->
+                                val fullPath = if (group.directoryPath.isEmpty()) fileName else "${group.directoryPath}/$fileName"
                                 val fileShape = RoundedCornerShape(10.dp)
                                 Row(
                                     modifier = Modifier
@@ -7006,6 +7031,7 @@ private fun ZipContentsSheet(
                                         .clip(fileShape)
                                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, fileShape)
                                         .background(Color.White)
+                                        .clickable { onOpenChangedFile(fullPath) }
                                         .padding(horizontal = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
