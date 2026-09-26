@@ -416,14 +416,22 @@ class ClaudeRuntimeBridge(
                         toolName.equals("ask_question", true) ||
                         toolName.equals("ClarificationQuestion", true)
                     ) {
-                        val text = input.optString("question").ifBlank {
-                            input.optString("text").ifBlank {
-                                input.optString("prompt").ifBlank { explanation }
+                        val questionsArr = input.optJSONArray("questions")
+                        val firstQuestion = questionsArr?.optJSONObject(0)
+                        val text = firstQuestion?.optString("question")?.takeIf(String::isNotBlank)
+                            ?: input.optString("question").ifBlank {
+                                input.optString("text").ifBlank {
+                                    input.optString("prompt").ifBlank { explanation }
+                                }
+                            }
+                        val optionsArr = firstQuestion?.optJSONArray("options") ?: input.optJSONArray("options")
+                        val options = (0 until (optionsArr?.length() ?: 0)).mapNotNull { idx ->
+                            when (val opt = optionsArr?.opt(idx)) {
+                                is JSONObject -> opt.optString("label").ifBlank { opt.optString("description") }.takeIf(String::isNotBlank)
+                                is String -> opt.takeIf(String::isNotBlank)
+                                else -> null
                             }
                         }
-                        val optionsArr = input.optJSONArray("options")
-                        val options = (0 until (optionsArr?.length() ?: 0))
-                            .mapNotNull { optionsArr?.optString(it)?.takeIf(String::isNotBlank) }
                         val responseFile = File(file.parentFile, "$approvalId.response")
                         val request = QuestionRequest(
                             questionId = approvalId,
@@ -626,14 +634,25 @@ class ClaudeRuntimeBridge(
             name.equals("ask_question", true) ||
             name.equals("ClarificationQuestion", true)
         ) {
-            val text = input.optString("question").ifBlank {
-                input.optString("text").ifBlank {
-                    input.optString("prompt").ifBlank { "The agent is asking for clarification." }
+            // Real Claude Code AskUserQuestion payloads nest everything under
+            // "questions": [{ "question": ..., "options": [{"label":..., "description":...}], ... }].
+            // Fall back to a flat question/options shape for older or custom protocols.
+            val questionsArr = input.optJSONArray("questions")
+            val firstQuestion = questionsArr?.optJSONObject(0)
+            val text = firstQuestion?.optString("question")?.takeIf(String::isNotBlank)
+                ?: input.optString("question").ifBlank {
+                    input.optString("text").ifBlank {
+                        input.optString("prompt").ifBlank { "The agent is asking for clarification." }
+                    }
+                }
+            val optionsArr = firstQuestion?.optJSONArray("options") ?: input.optJSONArray("options")
+            val options = (0 until (optionsArr?.length() ?: 0)).mapNotNull { idx ->
+                when (val opt = optionsArr?.opt(idx)) {
+                    is JSONObject -> opt.optString("label").ifBlank { opt.optString("description") }.takeIf(String::isNotBlank)
+                    is String -> opt.takeIf(String::isNotBlank)
+                    else -> null
                 }
             }
-            val optionsArr = input.optJSONArray("options")
-            val options = (0 until (optionsArr?.length() ?: 0))
-                .mapNotNull { optionsArr?.optString(it)?.takeIf(String::isNotBlank) }
             val questionReq = QuestionRequest(
                 questionId = id.ifBlank { UUID.randomUUID().toString() },
                 sessionId = sessionId,
