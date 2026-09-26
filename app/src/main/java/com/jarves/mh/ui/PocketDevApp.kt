@@ -47,6 +47,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
@@ -2217,7 +2221,7 @@ private fun RootScreenHost(
                                 Box(
                                     modifier = Modifier
                                         .padding(horizontal = 6.dp)
-                                        .size(44.dp)
+                                        .size(40.dp)
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(tabIndicatorColor)
                                         .clickable(onClick = { screen = tab }),
@@ -2227,13 +2231,13 @@ private fun RootScreenHost(
                                         RootScreen.PROJECTS -> Icon(
                                             painterResource(R.drawable.ic_custom_folder),
                                             contentDescription = tab.label,
-                                            modifier = Modifier.size(24.dp),
+                                            modifier = Modifier.size(20.dp),
                                             tint = tabTint,
                                         )
                                         RootScreen.AGENT -> Icon(
                                             painterResource(R.drawable.ic_custom_agent_mark),
                                             contentDescription = tab.label,
-                                            modifier = Modifier.size(24.dp),
+                                            modifier = Modifier.size(20.dp),
                                             tint = tabTint,
                                         )
                                         else -> Icon(
@@ -2247,7 +2251,7 @@ private fun RootScreenHost(
                             Spacer(Modifier.width(2.dp))
                             androidx.compose.material3.HorizontalDivider(
                                 modifier = Modifier
-                                    .height(24.dp)
+                                    .height(20.dp)
                                     .width(1.dp),
                                 color = Color.Black,
                             )
@@ -2266,7 +2270,7 @@ private fun RootScreenHost(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .padding(horizontal = 6.dp)
-                                    .height(44.dp)
+                                    .height(40.dp)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(Color.White)
                                     .clickable(onClick = { showQuickTerminal = true })
@@ -2275,7 +2279,7 @@ private fun RootScreenHost(
                                 Icon(
                                     Icons.Default.Terminal,
                                     contentDescription = "Terminal",
-                                    modifier = Modifier.size(20.dp),
+                                    modifier = Modifier.size(17.dp),
                                     tint = terminalTint,
                                 )
                                 Spacer(Modifier.width(6.dp))
@@ -2291,20 +2295,16 @@ private fun RootScreenHost(
 
                     Box {
                         Surface(
-                            shape = CircleShape,
-                            color = Color.White,
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color.Black,
                             shadowElevation = 0.dp,
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                            ),
                             modifier = Modifier.fillMaxHeight(),
                         ) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxHeight()
                                     .aspectRatio(1f)
-                                    .clip(CircleShape)
+                                    .clip(RoundedCornerShape(10.dp))
                                     .clickable { quickActionsExpanded = !quickActionsExpanded },
                                 contentAlignment = Alignment.Center,
                             ) {
@@ -2312,7 +2312,7 @@ private fun RootScreenHost(
                                     imageVector = Icons.Default.Add,
                                     contentDescription = "Quick actions",
                                     modifier = Modifier.size(22.dp),
-                                    tint = MaterialTheme.colorScheme.onBackground,
+                                    tint = Color.White,
                                 )
                             }
                         }
@@ -3466,84 +3466,6 @@ private fun ProjectsScreen(
                 Text("Chat, review changes, and preview your project.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(16.dp))
             }
-            item {
-                val isImportExpanded = importExpanded || state.projectImporting || state.gitCloneRunning
-                AnimatedVisibility(visible = isImportExpanded) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                        shape = RoundedCornerShape(0.dp),
-                        color = Color.White,
-                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Text("Bring an existing project", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
-                            Text(
-                                "ZIP file, Git repository, or GitHub",
-                                fontSize = 10.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                                ImportSourceButton(
-                                    painter = painterResource(R.drawable.ic_custom_import),
-                                    title = if (state.projectImporting) "Importing…" else "ZIP file",
-                                    enabled = !state.projectImporting && !state.gitCloneRunning,
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(0.dp),
-                                    onClick = { importZipLauncher.launch("*/*") },
-                                    loading = state.projectImporting,
-                                )
-                                ImportSourceButton(
-                                    painter = painterResource(R.drawable.ic_custom_link),
-                                    title = if (state.gitCloneRunning) "Cloning…" else "Git URL",
-                                    enabled = !state.projectImporting && !state.gitCloneRunning,
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(0.dp),
-                                    onClick = { showGitDialog = true },
-                                    loading = state.gitCloneRunning,
-                                )
-                            }
-                            Surface(
-                                modifier = Modifier.fillMaxWidth().clickable(enabled = !state.gitCloneRunning) {
-                                    showGitHubDialog = true
-                                    if (state.githubAuthStatus == GitHubAuthStatus.CONNECTED && state.githubRepositories.isEmpty()) onRefreshGitHub()
-                                },
-                                color = MaterialTheme.colorScheme.surface,
-                                shape = RoundedCornerShape(0.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            ) {
-                                Row(Modifier.padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        painter = painterResource(R.drawable.ic_custom_github),
-                                        contentDescription = null,
-                                        tint = Color.Black,
-                                        modifier = Modifier.size(20.dp),
-                                    )
-                                    Spacer(Modifier.width(10.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            state.githubLogin?.let { "GitHub · @$it" } ?: "Connect GitHub",
-                                            fontSize = 12.5.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                        Text(
-                                            if (state.githubLogin != null) "Browse public and private repositories" else "Sign in to access your repositories",
-                                            fontSize = 10.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                            (state.projectImportMessage ?: state.gitCloneMessage)?.let { message ->
-                                Text(message, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.primary)
-                            }
-                        }
-                    }
-                }
-            }
             state.appUpdate?.let { update ->
                 item {
                     Surface(
@@ -3625,6 +3547,88 @@ private fun ProjectsScreen(
                         onRename = { onRenameProject(project.id, it) },
                         onDelete = { onDeleteProject(project.id) },
                     )
+                }
+            }
+        }
+        val isImportExpanded = importExpanded || state.projectImporting || state.gitCloneRunning
+        AnimatedVisibility(
+            visible = isImportExpanded,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                color = Color.White,
+                shadowElevation = 8.dp,
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Bring an existing project", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "ZIP file, Git repository, or GitHub",
+                        fontSize = 10.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        ImportSourceButton(
+                            painter = painterResource(R.drawable.ic_custom_import),
+                            title = if (state.projectImporting) "Importing…" else "ZIP file",
+                            enabled = !state.projectImporting && !state.gitCloneRunning,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(5.dp),
+                            onClick = { importZipLauncher.launch("*/*") },
+                            loading = state.projectImporting,
+                        )
+                        ImportSourceButton(
+                            painter = painterResource(R.drawable.ic_custom_link),
+                            title = if (state.gitCloneRunning) "Cloning…" else "Git URL",
+                            enabled = !state.projectImporting && !state.gitCloneRunning,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(5.dp),
+                            onClick = { showGitDialog = true },
+                            loading = state.gitCloneRunning,
+                        )
+                    }
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = !state.gitCloneRunning) {
+                            showGitHubDialog = true
+                            if (state.githubAuthStatus == GitHubAuthStatus.CONNECTED && state.githubRepositories.isEmpty()) onRefreshGitHub()
+                        },
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(5.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    ) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_custom_github),
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    state.githubLogin?.let { "GitHub · @$it" } ?: "Connect GitHub",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    if (state.githubLogin != null) "Browse public and private repositories" else "Sign in to access your repositories",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    (state.projectImportMessage ?: state.gitCloneMessage)?.let { message ->
+                        Text(message, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
         }
