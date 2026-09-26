@@ -2327,6 +2327,7 @@ private fun RootScreenHost(
                 )
                 RootScreen.SETTINGS -> SettingsScreen(
                     state = state,
+                    onBack = { screen = RootScreen.PROJECTS },
                     onSaveProvider = { profile, key ->
                         viewModel.updateProvider(profile, key)
                     },
