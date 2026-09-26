@@ -71,6 +71,7 @@ class ClaudeRuntimeBridge(
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir)
     private val lessons = AgentLessonsStore(context)
+    private val agentRules = AgentRulesManager(context)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
     override val events: Flow<RuntimeEvent> = eventBus
     private val pending = ConcurrentHashMap<String, PendingPermission>()
@@ -149,6 +150,7 @@ class ClaudeRuntimeBridge(
             val installed = installer.installedRuntime()
             installer.ensureSettingsAndHooks()
             val workspace = ensureWorkspace(projectId)
+            agentRules.syncToWorkspace(workspace)
             createCheckpoint(projectId, workspace)
             val before = snapshot(workspace)
             formatGateway = if (provider.kind.protocol in setOf(
