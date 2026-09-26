@@ -409,10 +409,14 @@ class AntigravityRuntimeBridge(
             }
             pending.toString().trim().takeIf(String::isNotEmpty)?.let { handleLine(it) }
             val exit = process.waitFor()
-            check(exit == 0 && resultSeen) {
+            val paths = checkpoints.changedFiles(ws, snapshotBefore)
+            // agy sometimes tears down its network stream right after finishing real work, before
+            // it manages to print the final Result JSON line. If the process still exited cleanly
+            // and files were actually written, trust that evidence over the missing Result event
+            // instead of reporting a false "Task stopped" for a task that truly completed.
+            check(exit == 0 && (resultSeen || paths.isNotEmpty())) {
                 friendlyError(pending.toString().takeLast(1_000).ifBlank { "Antigravity exited with code $exit" })
             }
-            val paths = checkpoints.changedFiles(ws, snapshotBefore)
             checkpoints.saveChangedPaths(projectId, paths)
             if (paths.isNotEmpty()) {
                 eventBus.emit(RuntimeEvent.FilesChanged(sessionId, checkpoints.buildChangeDetails(projectId, ws, paths)))
