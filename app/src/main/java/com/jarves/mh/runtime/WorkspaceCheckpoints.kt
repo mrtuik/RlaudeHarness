@@ -567,7 +567,12 @@ class WorkspaceCheckpoints(private val filesDir: File) {
 
     fun isInternalRuntimePath(path: String): Boolean {
         val normalized = path.replace('\\', '/')
-        return normalized == ".claude" || normalized == ".claude.json" || normalized.startsWith(".claude/")
+        return normalized == ".claude" || normalized == ".claude.json" || normalized.startsWith(".claude/") ||
+            // Chat attachments (uploaded photos/files) live under attachments/<chatId>/ inside the
+            // workspace root. They are not project source files, so they must never be captured in
+            // a version snapshot, counted as a "changed" file, or bundled into a project zip — even
+            // when they are the only file present in a brand-new project's workspace.
+            normalized == "attachments" || normalized.startsWith("attachments/")
     }
 
     private fun digest(file: File): String {
