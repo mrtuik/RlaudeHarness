@@ -290,13 +290,30 @@ class DshRuntimeBridge(
                         protocolEvent.name.equals("ask_question", true) ||
                         protocolEvent.name.equals("ClarificationQuestion", true)
                     ) {
+                        val input = runCatching { JSONObject(protocolEvent.rawArguments) }.getOrNull() ?: JSONObject()
+                        val questionsArr = input.optJSONArray("questions")
+                        val firstQuestion = questionsArr?.optJSONObject(0)
+                        val text = firstQuestion?.optString("question")?.takeIf(String::isNotBlank)
+                            ?: input.optString("question").ifBlank {
+                                input.optString("text").ifBlank {
+                                    protocolEvent.detail.ifBlank { "The agent is asking for clarification." }
+                                }
+                            }
+                        val optionsArr = firstQuestion?.optJSONArray("options") ?: input.optJSONArray("options")
+                        val options = (0 until (optionsArr?.length() ?: 0)).mapNotNull { idx ->
+                            when (val opt = optionsArr?.opt(idx)) {
+                                is JSONObject -> opt.optString("label").ifBlank { opt.optString("description") }.takeIf(String::isNotBlank)
+                                is String -> opt.takeIf(String::isNotBlank)
+                                else -> null
+                            }
+                        }
                         eventBus.emit(
                             RuntimeEvent.QuestionAsked(
                                 sessionId,
                                 QuestionRequest(
                                     sessionId = sessionId,
-                                    text = protocolEvent.detail.ifBlank { "The agent is asking for clarification." },
-                                    options = emptyList(),
+                                    text = text,
+                                    options = options,
                                     allowFreeText = true,
                                     allowSkip = true,
                                 ),
@@ -804,7 +821,7 @@ internal sealed interface DshSdkProtocolEvent {
         val startsNewBlock: Boolean,
         val isFinal: Boolean,
     ) : DshSdkProtocolEvent
-    data class ToolStarted(val callId: String, val name: String, val detail: String) : DshSdkProtocolEvent
+    data class ToolStarted(val callId: String, val name: String, val detail: String, val rawArguments: String = "") : DshSdkProtocolEvent
     data class ToolCompleted(val callId: String, val name: String, val summary: String) : DshSdkProtocolEvent
     data class AssistantText(val text: String) : DshSdkProtocolEvent
     data class Failed(val message: String) : DshSdkProtocolEvent
@@ -880,7 +897,7 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
                 val arguments = data.optString("arguments")
                 val displayName = displayToolName(rawName, arguments)
                 toolNames[callId] = displayName
-                DshSdkProtocolEvent.ToolStarted(callId, displayName, toolDetail(arguments))
+                DshSdkProtocolEvent.ToolStarted(callId, displayName, toolDetail(arguments), arguments)
             }
             "tool/result" -> {
                 val message = data.optJSONObject("message")
