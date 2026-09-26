@@ -65,6 +65,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build online debug APK
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon assembleOnlineDebug
