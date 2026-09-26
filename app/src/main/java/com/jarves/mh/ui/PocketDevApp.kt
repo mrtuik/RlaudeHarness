@@ -4950,33 +4950,8 @@ private fun FilesTab(
             }
         }
     }
-
-    if (selectedVersionEntry != null) {
-        val entry = selectedVersionEntry!!
-        AlertDialog(
-            onDismissRequest = { selectedVersionEntry = null },
-            confirmButton = {
-                TextButton(onClick = { selectedVersionEntry = null }) {
-                    Text("OK", color = Color.Black, fontWeight = FontWeight.Bold)
-                }
-            },
-            title = {
-                Text(entry.name, fontWeight = FontWeight.Bold, color = Color.Black)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Last changed in version: ${entry.versionTag}", color = Color.Black, fontWeight = FontWeight.Medium)
-                    Text("Path: ${entry.path}", fontSize = 12.sp, color = Color.Black)
-                    if (entry.isNewInCurrentVersion) {
-                        Text("Status: Modified in current version", fontWeight = FontWeight.Bold, color = Color.Black)
-                    }
-                }
-            },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(12.dp),
-        )
-    }
 }
+
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
