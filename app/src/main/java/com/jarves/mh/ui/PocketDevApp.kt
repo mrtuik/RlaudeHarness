@@ -4130,7 +4130,7 @@ private fun WorkspaceScreen(
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onApproval: (Boolean) -> Unit,
-    onAnswerQuestion: (com.jarves.mh.model.QuestionRequest, String?, Boolean) -> Unit = { _, _, _ -> },
+    onAnswerQuestion: (String, String?, Boolean) -> Unit = { _, _, _ -> },
     onRefreshFiles: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
     onCloseFile: () -> Unit,
