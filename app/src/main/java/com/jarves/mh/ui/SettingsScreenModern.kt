@@ -475,12 +475,12 @@ private fun SettingsAccordion(
                 Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Surface(shape = RoundedCornerShape(8.dp), color = Color.Black, modifier = Modifier.size(34.dp)) {
+                Surface(shape = RoundedCornerShape(8.dp), color = Color.Transparent, modifier = Modifier.size(34.dp)) {
                     Box(contentAlignment = Alignment.Center) {
                         if (iconPainter != null) {
-                            Icon(iconPainter, null, Modifier.size(18.dp), tint = Color.White)
+                            Icon(iconPainter, null, Modifier.size(18.dp), tint = Color.Black)
                         } else if (icon != null) {
-                            Icon(icon, null, Modifier.size(18.dp), tint = Color.White)
+                            Icon(icon, null, Modifier.size(18.dp), tint = Color.Black)
                         }
                     }
                 }
