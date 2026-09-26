@@ -1441,6 +1441,14 @@ class RuntimeInstaller(private val context: Context) {
         return installed
     }
 
+    /**
+     * Persistent, app-scoped npm cache directory. Kept outside the rootfs and
+     * outside any project workspace so it survives rootfs reinstalls and is
+     * shared across every project/session — a package downloaded once for
+     * project A is reused for project B.
+     */
+    private fun npmCacheDir(): File = File(context.filesDir, "npm-cache").apply { mkdirs() }
+
     fun process(
         proot: File,
         rootfs: File,
@@ -1491,6 +1499,12 @@ class RuntimeInstaller(private val context: Context) {
             add("${workspace.absolutePath}:$guestWorkspacePath")
             add("-b")
             add("${bridge.absolutePath}:/pocket-bridge")
+            // Persistent npm cache: bound at /root/.npm (npm's default cache
+            // location, since HOME=/root below) so repeat `npm install`s of
+            // the same package reuse the local cache instead of
+            // re-downloading from the registry every session.
+            add("-b")
+            add("${npmCacheDir().absolutePath}:/root/.npm")
             add("-w")
             add(guestWorkspacePath)
             addAll(guestCommand)
