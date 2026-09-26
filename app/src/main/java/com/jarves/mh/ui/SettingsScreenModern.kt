@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
@@ -115,6 +116,7 @@ private enum class SettingsSection { APPEARANCE, TOOLS, RUNTIME, AGENT_MEMORY, U
 @Composable
 fun SettingsScreen(
     state: AppUiState,
+    onBack: () -> Unit,
     onSaveProvider: (ProviderProfile, String) -> Unit,
     onDiscoverModels: suspend (ProviderProfile, String) -> ModelDiscoveryResult,
     onValidateProvider: suspend (ProviderProfile, String, List<DiscoveredModel>) -> ConnectionValidation,
@@ -174,25 +176,44 @@ fun SettingsScreen(
         expanded = if (expanded == section) null else section
     }
 
+    val settingsPageBg = Color(0xFFF3F3F4)
+
     Scaffold(
-        containerColor = Color.White,
+        containerColor = settingsPageBg,
         topBar = {
             TopAppBar(
                 modifier = Modifier.padding(top = 8.dp),
+                navigationIcon = {
+                    Surface(
+                        modifier = Modifier.padding(start = 6.dp).size(38.dp).clickable(onClick = onBack),
+                        shape = CircleShape,
+                        color = Color.White,
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                modifier = Modifier.size(18.dp),
+                                tint = Color.Black,
+                            )
+                        }
+                    }
+                },
                 title = {
                     Column {
                         Text("Settings", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                         Text("Preferences & Configuration", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBg),
             )
         },
     ) { padding ->
         LazyColumn(
             Modifier
                 .fillMaxSize()
-                .background(Color.White)
+                .background(settingsPageBg)
                 .padding(padding)
                 .imePadding(),
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
@@ -388,53 +409,56 @@ fun SettingsScreen(
 
             item {
                 Surface(
-                    color = Color.Transparent,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, Color(0xFFE9E9EB)),
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Settings, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Rlaude Harness", fontWeight = FontWeight.SemiBold)
-                            Text("Local AI coding workspace", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            SettingsIconBadge(icon = Icons.Default.Settings)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Rlaude Harness", fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp)
+                                Text("Local AI coding workspace", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text("v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Text("v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, Uri.parse(BuildConfig.PRIVACY_POLICY_URL)),
+                        HorizontalDivider(color = Color(0xFFE9E9EB))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_VIEW, Uri.parse(BuildConfig.PRIVACY_POLICY_URL)),
+                                        )
+                                    }
+                                }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            SettingsIconBadge(icon = Icons.Default.PrivacyTip)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Privacy policy", fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp)
+                                Text(
+                                    "How local data and AI provider requests are handled",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
+                            Icon(
+                                Icons.AutoMirrored.Filled.OpenInNew,
+                                contentDescription = "Open privacy policy",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Default.PrivacyTip,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Privacy policy", fontWeight = FontWeight.Medium)
-                        Text(
-                            "How local data and AI provider requests are handled",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
-                    Icon(
-                        Icons.AutoMirrored.Filled.OpenInNew,
-                        contentDescription = "Open privacy policy",
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
                 Spacer(Modifier.height(18.dp))
             }
@@ -466,25 +490,17 @@ private fun SettingsAccordion(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(18.dp),
         color = Color.White,
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        border = BorderStroke(1.dp, Color(0xFFE9E9EB)),
     ) {
         Column {
             Row(
-                Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp),
+                Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Surface(shape = RoundedCornerShape(8.dp), color = Color.Transparent, modifier = Modifier.size(34.dp)) {
-                    Box(contentAlignment = Alignment.Center) {
-                        if (iconPainter != null) {
-                            Icon(iconPainter, null, Modifier.size(18.dp), tint = Color.Black)
-                        } else if (icon != null) {
-                            Icon(icon, null, Modifier.size(18.dp), tint = Color.Black)
-                        }
-                    }
-                }
-                Spacer(Modifier.width(11.dp))
+                SettingsIconBadge(icon = icon, iconPainter = iconPainter)
+                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp)
                     Text(subtitle, fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -500,6 +516,23 @@ private fun SettingsAccordion(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { content() }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsIconBadge(icon: ImageVector? = null, iconPainter: Painter? = null) {
+    Surface(
+        shape = RoundedCornerShape(11.dp),
+        color = Color(0xFFF0F0F1),
+        modifier = Modifier.size(38.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            if (iconPainter != null) {
+                Icon(iconPainter, null, Modifier.size(18.dp), tint = Color.Black)
+            } else if (icon != null) {
+                Icon(icon, null, Modifier.size(18.dp), tint = Color.Black)
             }
         }
     }
