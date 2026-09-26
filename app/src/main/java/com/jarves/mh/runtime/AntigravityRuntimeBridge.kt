@@ -630,5 +630,11 @@ internal fun antigravityWorkspacePrompt(projectSlug: String, prompt: String): St
     If multiple questions exist, answer each one explicitly and separately in the response.
     Only after all questions in the message have been fully and directly answered should you proceed to any new task included in the same message.
 
+    SELF-VERIFICATION BEFORE FINISHING:
+    Before ending your turn, check whether this project has a way to catch syntax or compile errors (a build command, a compiler, a linter, or simply opening the file in a browser for plain HTML/CSS/JS). If one exists, run it on every file you created or edited.
+    If it reports any error, fix that error yourself and re-run the check. Repeat until the check passes cleanly or you have made a genuine, reasonable effort to fix it.
+    Only report the task as finished once this check has passed, or once you have clearly told the user which specific error remains and why you could not resolve it.
+    Do not skip this step to save time: a task that finishes fast but leaves broken code costs more of the user's time overall than one that takes a little longer and works on the first try.
+
     $prompt
 """.trimIndent()
