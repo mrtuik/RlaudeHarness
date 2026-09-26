@@ -47,6 +47,7 @@ class DshRuntimeBridge(
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir)
     private val lessons = AgentLessonsStore(context)
+    private val agentRules = AgentRulesManager(context)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
     override val events: Flow<RuntimeEvent> = eventBus
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
@@ -113,6 +114,7 @@ class DshRuntimeBridge(
             }
             installer.ensureDshAndroidCompatibility()
             val workspace = checkpoints.ensureWorkspace(projectId)
+            agentRules.syncToWorkspace(workspace)
             checkpoints.createCheckpoint(projectId, workspace)
             val before = checkpoints.snapshot(workspace)
             val route = DshRouteMapper.forProfile(provider)
