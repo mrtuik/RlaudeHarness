@@ -1,1 +1,0 @@
-Expose literal release versions for reliable F-Droid update detection.
