@@ -309,6 +309,8 @@ class AntigravityRuntimeBridge(
             return@withContext sessionId
         }
 
+        var workspace: File? = null
+        var before: Map<String, String>? = null
         runCatching {
             RuntimeTaskController.stopAction = {
                 userStopRequested = true
@@ -316,14 +318,16 @@ class AntigravityRuntimeBridge(
             }
             startForegroundRuntime(projectName)
             val installed = installer.installedRuntime()
-            val workspace = checkpoints.ensureWorkspace(projectId)
-            checkpoints.createCheckpoint(projectId, workspace)
-            val before = checkpoints.snapshot(workspace)
+            val ws = checkpoints.ensureWorkspace(projectId)
+            workspace = ws
+            checkpoints.createCheckpoint(projectId, ws)
+            val snapshotBefore = checkpoints.snapshot(ws)
+            before = snapshotBefore
             val command = antigravityCommand(model(), effort(), conversationId(projectId))
             val process = installer.process(
                 installed.proot,
                 installed.rootfs,
-                workspace,
+                ws,
                 emptyMap(),
                 command,
                 guestWorkspacePath = "/workspace/$projectSlug",
@@ -408,20 +412,24 @@ class AntigravityRuntimeBridge(
             check(exit == 0 && resultSeen) {
                 friendlyError(pending.toString().takeLast(1_000).ifBlank { "Antigravity exited with code $exit" })
             }
-            val paths = checkpoints.changedFiles(workspace, before)
+            val paths = checkpoints.changedFiles(ws, snapshotBefore)
             checkpoints.saveChangedPaths(projectId, paths)
             if (paths.isNotEmpty()) {
-                eventBus.emit(RuntimeEvent.FilesChanged(sessionId, checkpoints.buildChangeDetails(projectId, workspace, paths)))
+                eventBus.emit(RuntimeEvent.FilesChanged(sessionId, checkpoints.buildChangeDetails(projectId, ws, paths)))
             }
             emitCompleted(sessionId)
             finishForegroundRuntime(true, projectName, "Antigravity CLI finished working in $projectName.")
         }.onFailure {
             val message = if (userStopRequested) "Stopped by user" else friendlyError(it.message.orEmpty())
-            runCatching {
-                val paths = checkpoints.changedFiles(workspace, before)
-                checkpoints.saveChangedPaths(projectId, paths)
-                if (paths.isNotEmpty()) {
-                    eventBus.emit(RuntimeEvent.FilesChanged(sessionId, checkpoints.buildChangeDetails(projectId, workspace, paths)))
+            val ws = workspace
+            val snapshotBefore = before
+            if (ws != null && snapshotBefore != null) {
+                runCatching {
+                    val paths = checkpoints.changedFiles(ws, snapshotBefore)
+                    checkpoints.saveChangedPaths(projectId, paths)
+                    if (paths.isNotEmpty()) {
+                        eventBus.emit(RuntimeEvent.FilesChanged(sessionId, checkpoints.buildChangeDetails(projectId, ws, paths)))
+                    }
                 }
             }
             emitFailure(sessionId, message)
