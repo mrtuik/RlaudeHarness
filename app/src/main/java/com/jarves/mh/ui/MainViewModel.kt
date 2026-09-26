@@ -3303,6 +3303,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val previousAssistantMessage = state.value.messages.lastOrNull { !it.fromUser && it.text.isNotBlank() }
         if (previousAssistantMessage != null && prompt.isNotBlank()) {
             val pat = vault.get("github_lessons")
+            val groq = vault.get("github_lessons_groq") ?: vault.get("groq")
             val repo = _state.value.githubLessonsRepo
             val userMsg = prompt.trim()
             val prevText = previousAssistantMessage.text
@@ -3313,6 +3314,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         userMessage = userMsg,
                         patToken = pat,
                         repo = repo,
+                        customGroqKey = groq,
                     )
                 }
             }
