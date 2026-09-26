@@ -5332,7 +5332,12 @@ private fun ChatTab(
                 sizeBytes = 0L,
             )
         } else {
-            onOpenFile(WorkspaceEntry(path = path, name = path.substringAfterLast('/'), isDirectory = false, depth = 0))
+            viewingTextAttachment = ChatAttachment(
+                displayName = path.substringAfterLast('/'),
+                relativePath = path,
+                mimeType = "text/plain",
+                sizeBytes = 0L,
+            )
         }
     }
     val displayMessages = remember(messages) {
@@ -5548,7 +5553,7 @@ private fun ChatTab(
                     .padding(horizontal = 14.dp, vertical = 4.dp),
             )
         }
-        if (readOnly) {
+        if (readOnly && !readOnlyBlocked) {
             Surface(
                 color = MaterialTheme.colorScheme.background,
                 modifier = Modifier.fillMaxWidth(),
@@ -5582,7 +5587,7 @@ private fun ChatTab(
                 }
             }
         } else {
-            val canSend = prompt.isNotBlank() || pendingAttachments.isNotEmpty()
+            val canSend = !readOnly && (prompt.isNotBlank() || pendingAttachments.isNotEmpty())
             var attachMenuOpen by remember { mutableStateOf(false) }
             Surface(
                 shape = RoundedCornerShape(14.dp),
