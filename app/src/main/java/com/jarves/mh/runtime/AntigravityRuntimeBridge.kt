@@ -174,6 +174,7 @@ class AntigravityRuntimeBridge(
     private val installer = RuntimeInstaller(context)
     private val checkpoints = WorkspaceCheckpoints(context.filesDir)
     private val lessons = AgentLessonsStore(context)
+    private val agentRules = AgentRulesManager(context)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
     override val events: Flow<RuntimeEvent> = eventBus
     private val finished = ConcurrentHashMap.newKeySet<String>()
@@ -320,6 +321,7 @@ class AntigravityRuntimeBridge(
             val installed = installer.installedRuntime()
             val ws = checkpoints.ensureWorkspace(projectId)
             workspace = ws
+            agentRules.syncToWorkspace(ws)
             checkpoints.createCheckpoint(projectId, ws)
             val snapshotBefore = checkpoints.snapshot(ws)
             before = snapshotBefore
