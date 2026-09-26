@@ -997,7 +997,11 @@ class ClaudeRuntimeBridge(
 
     private fun isInternalRuntimePath(path: String): Boolean {
         val normalized = path.replace('\\', '/')
-        return normalized == ".claude" || normalized == ".claude.json" || normalized.startsWith(".claude/")
+        return normalized == ".claude" || normalized == ".claude.json" || normalized.startsWith(".claude/") ||
+            // Chat attachments (uploaded photos/files) live under attachments/<chatId>/ inside the
+            // workspace root. They are not project source files, so they must never be treated as a
+            // changed file in the Changes tab.
+            normalized == "attachments" || normalized.startsWith("attachments/")
     }
 
     private fun digest(file: File): String {
