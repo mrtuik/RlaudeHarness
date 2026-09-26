@@ -2210,15 +2210,20 @@ private fun RootScreenHost(
                                         .clickable(onClick = { screen = tab }),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    if (tab == RootScreen.PROJECTS) {
-                                        Icon(
+                                    when (tab) {
+                                        RootScreen.PROJECTS -> Icon(
                                             painterResource(R.drawable.ic_custom_folder),
                                             contentDescription = tab.label,
                                             modifier = Modifier.size(24.dp),
                                             tint = tabTint,
                                         )
-                                    } else {
-                                        Icon(
+                                        RootScreen.AGENT -> Icon(
+                                            painterResource(R.drawable.ic_custom_agent_mark),
+                                            contentDescription = tab.label,
+                                            modifier = Modifier.size(24.dp),
+                                            tint = tabTint,
+                                        )
+                                        else -> Icon(
                                             if (selected) tab.selectedIcon else tab.icon,
                                             contentDescription = tab.label,
                                             tint = tabTint,
@@ -3335,106 +3340,20 @@ private fun ProjectsScreen(
             )
         },
     ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().background(Color.White).padding(padding),
-            contentPadding = PaddingValues(18.dp),
+            modifier = Modifier.fillMaxSize().background(Color.White),
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 78.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
                 Text("Build from your phone", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text("Chat, review changes, and preview your project.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(16.dp))
+            }
+            item {
                 val isImportExpanded = importExpanded || state.projectImporting || state.gitCloneRunning
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Button(
-                        onClick = onCreateQuickProject,
-                        modifier = Modifier.weight(1f).aspectRatio(1f),
-                        shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(4.dp),
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Icon(
-                                imageVector = ImageVector.vectorResource(R.drawable.ic_quick_project),
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Spacer(Modifier.height(5.dp))
-                            Text(
-                                text = "Quick project",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 10.sp,
-                                textAlign = TextAlign.Center,
-                                maxLines = 2,
-                            )
-                        }
-                    }
-                    OutlinedButton(
-                        onClick = { importExpanded = !importExpanded },
-                        modifier = Modifier.weight(1f).aspectRatio(1f),
-                        shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(4.dp),
-                        border = BorderStroke(
-                            1.dp,
-                            if (isImportExpanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                        ),
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_custom_import),
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                                tint = Color.Unspecified,
-                            )
-                            Spacer(Modifier.height(5.dp))
-                            Text(
-                                text = "Import",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 10.sp,
-                                textAlign = TextAlign.Center,
-                                maxLines = 2,
-                            )
-                        }
-                    }
-                    OutlinedButton(
-                        onClick = { showCreate = true },
-                        modifier = Modifier.weight(1f).aspectRatio(1f),
-                        shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(4.dp),
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Spacer(Modifier.height(5.dp))
-                            Text(
-                                text = "New project",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 10.sp,
-                                textAlign = TextAlign.Center,
-                                maxLines = 2,
-                            )
-                        }
-                    }
-                }
                 AnimatedVisibility(visible = isImportExpanded) {
                     Surface(
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
@@ -3591,6 +3510,75 @@ private fun ProjectsScreen(
                         onOpen = { onOpen(project) },
                         onRename = { onRenameProject(project.id, it) },
                         onDelete = { onDeleteProject(project.id) },
+                    )
+                }
+            }
+        }
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier.size(48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_custom_expand),
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.onBackground,
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.onBackground)
+                        .clickable { importExpanded = !importExpanded },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_custom_zip),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.background,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Import",
+                        color = MaterialTheme.colorScheme.background,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp))
+                        .clickable { showCreate = true },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onBackground,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "New",
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
                     )
                 }
             }
@@ -3957,9 +3945,12 @@ private fun ProjectCard(
         colors = CardDefaults.cardColors(containerColor = Color.White),
     ) {
         Row(Modifier.padding(start = 14.dp, top = 7.dp, bottom = 7.dp, end = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(shape = RoundedCornerShape(11.dp), color = Color.White, border = BorderStroke(1.dp, Color(0xFFE2E8F0))) {
-                Icon(Icons.Default.Folder, null, Modifier.padding(8.dp).size(18.dp), tint = Color.Black)
-            }
+            Icon(
+                painter = painterResource(R.drawable.ic_custom_workspace),
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
             Spacer(Modifier.width(11.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
