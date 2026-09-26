@@ -3561,14 +3561,36 @@ private fun ProjectsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                 color = Color.White,
-                shadowElevation = 8.dp,
+                shadowElevation = 0.dp,
                 border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
             ) {
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(16.dp).padding(bottom = 64.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("Bring an existing project", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Bring an existing project", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(RoundedCornerShape(5.dp))
+                                .clickable(enabled = !state.projectImporting && !state.gitCloneRunning) {
+                                    onImportExpandedChange(false)
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Close",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     Text(
                         "ZIP file, Git repository, or GitHub",
                         fontSize = 10.5.sp,
