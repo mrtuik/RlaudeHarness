@@ -103,6 +103,10 @@ android {
 
         buildConfigField("boolean", "IS_PLAY_BUILD", playBuild.toString())
         buildConfigField("String", "PRIVACY_POLICY_URL", buildConfigString(privacyPolicyUrl))
+        val groqApiKey = providers.environmentVariable("GROQ_API_KEY")
+            .orElse(providers.gradleProperty("groqApiKey"))
+            .getOrElse("")
+        buildConfigField("String", "GROQ_API_KEY", buildConfigString(groqApiKey))
 
         buildConfigField(
             "String",
