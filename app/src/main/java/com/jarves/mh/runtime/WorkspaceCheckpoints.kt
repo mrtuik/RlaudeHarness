@@ -1,0 +1,527 @@
+package com.jarves.mh.runtime
+
+import com.jarves.mh.model.ChangeItem
+import com.jarves.mh.model.DiffLine
+import com.jarves.mh.model.DiffLineType
+import java.io.File
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class ProjectVersion(
+    val versionTag: String,
+    val versionNumber: Int,
+    val timestamp: Long,
+    val changedPaths: List<String>,
+)
+
+/**
+ * Workspace checkpoint / snapshot / diff store shared by agent bridges.
+ *
+ * Each project workspace gets a baseline copy before a session runs; after the
+ * run the baseline is diffed to produce reviewable [ChangeItem]s with
+ * per-file Undo/Keep. Semantics mirror the original Claude bridge store so
+ * both agents behave identically in the Changes tab.
+ */
+class WorkspaceCheckpoints(private val filesDir: File) {
+    private val projectRoots = ConcurrentHashMap<String, String>()
+
+    fun ensureWorkspace(projectId: String): File {
+        val base = File(filesDir, "workspaces/$projectId").apply { mkdirs() }.canonicalFile
+        val rootPath = projectRoots[projectId].orEmpty()
+        if (rootPath.isBlank()) return base
+        val selected = File(base, rootPath).canonicalFile
+        require(selected.toPath().startsWith(base.toPath())) { "Unsafe project root" }
+        return selected.apply { mkdirs() }
+    }
+
+    fun configureProjectRoot(projectId: String, rootPath: String) {
+        val normalized = rootPath.trim().trim('/')
+        require(normalized.isBlank() || (!normalized.contains("..") && !normalized.startsWith('/'))) {
+            "Unsafe project root"
+        }
+        val previous = projectRoots.put(projectId, normalized).orEmpty()
+        if (previous != normalized) checkpointDir(projectId).deleteRecursively()
+    }
+
+    fun checkpointDir(projectId: String) = File(filesDir, "checkpoints/$projectId/latest")
+
+    fun versionsDir(projectId: String) = File(filesDir, "versions/$projectId")
+
+    fun loadVersions(projectId: String): List<ProjectVersion> {
+        val manifest = File(versionsDir(projectId), "versions.json")
+        if (!manifest.isFile) return emptyList()
+        return runCatching {
+            val array = JSONArray(manifest.readText())
+            (0 until array.length()).map { i ->
+                val obj = array.getJSONObject(i)
+                val pathsArr = obj.optJSONArray("changedPaths")
+                val paths = if (pathsArr != null) {
+                    (0 until pathsArr.length()).map { pathsArr.getString(it) }
+                } else emptyList()
+                ProjectVersion(
+                    versionTag = obj.getString("versionTag"),
+                    versionNumber = obj.getInt("versionNumber"),
+                    timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                    changedPaths = paths,
+                )
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private val pendingVersions = ConcurrentHashMap<String, ProjectVersion>()
+
+    fun getPendingVersion(projectId: String): ProjectVersion? = pendingVersions[projectId]
+
+    fun discardPendingVersion(projectId: String) {
+        val pending = pendingVersions.remove(projectId) ?: return
+        val pendingFolder = File(versionsDir(projectId), "v${pending.versionNumber}")
+        pendingFolder.deleteRecursively()
+    }
+
+    fun normalizeRelativePath(workspace: File, path: String): String {
+        val clean = path.trim().trim('`').replace('\\', '/')
+        val workspacePrefix = workspace.canonicalFile.invariantSeparatorsPath.trimEnd('/') + "/"
+        if (clean.startsWith(workspacePrefix)) {
+            return clean.removePrefix(workspacePrefix).trimStart('/')
+        }
+        if (clean.contains("/workspace/")) {
+            val after = clean.substringAfter("/workspace/")
+            val relative = if (after.contains('/')) after.substringAfter('/') else after
+            if (relative.isNotBlank()) return relative.trimStart('/')
+        }
+        return clean.trimStart('/')
+    }
+
+    fun prepareNextVersion(projectId: String, workspace: File): ProjectVersion {
+        val existing = loadVersions(projectId)
+        if (existing.isEmpty()) {
+            val hasFiles = workspace.walkTopDown().any {
+                it.isFile && !isInternalRuntimePath(it.relativeTo(workspace).invariantSeparatorsPath)
+            }
+            if (hasFiles) {
+                recordVersionSnapshot(projectId, workspace, emptyList())
+            }
+        }
+        val currentVersions = loadVersions(projectId)
+        val nextNumber = currentVersions.size + 1
+        val tag = "V1.${nextNumber - 1}"
+        val snapshotFolder = File(versionsDir(projectId), "v$nextNumber/project").apply { mkdirs() }
+        val workspacePath = workspace.canonicalFile.toPath()
+
+        workspace.walkTopDown()
+            .onEnter { directory ->
+                directory == workspace || (
+                    !java.nio.file.Files.isSymbolicLink(directory.toPath()) &&
+                        runCatching { directory.canonicalFile.toPath().startsWith(workspacePath) }.getOrDefault(false)
+                )
+            }
+            .filter {
+                it.isFile &&
+                    !isInternalRuntimePath(it.relativeTo(workspace).invariantSeparatorsPath) &&
+                    !java.nio.file.Files.isSymbolicLink(it.toPath())
+            }
+            .forEach { source ->
+                val relative = source.relativeTo(workspace).invariantSeparatorsPath
+                val destination = safeWorkspaceFile(snapshotFolder, relative)
+                destination.parentFile?.mkdirs()
+                source.copyTo(destination, overwrite = true)
+            }
+
+        val pending = ProjectVersion(
+            versionTag = tag,
+            versionNumber = nextNumber,
+            timestamp = System.currentTimeMillis(),
+            changedPaths = emptyList(),
+        )
+        pendingVersions[projectId] = pending
+        return pending
+    }
+
+    fun finalizeVersion(projectId: String, workspace: File, changedPaths: List<String>): ProjectVersion? {
+        val normalizedPaths = changedPaths
+            .map { normalizeRelativePath(workspace, it) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+        val pending = pendingVersions.remove(projectId)
+        if (normalizedPaths.isEmpty()) {
+            if (pending != null) {
+                val pendingFolder = File(versionsDir(projectId), "v${pending.versionNumber}")
+                pendingFolder.deleteRecursively()
+            }
+            return null
+        }
+        val existing = loadVersions(projectId)
+        val nextNumber = pending?.versionNumber ?: (existing.size + 1)
+        val tag = pending?.versionTag ?: "V1.${nextNumber - 1}"
+        val snapshotFolder = File(versionsDir(projectId), "v$nextNumber/project").apply { mkdirs() }
+        val workspacePath = workspace.canonicalFile.toPath()
+
+        workspace.walkTopDown()
+            .onEnter { directory ->
+                directory == workspace || (
+                    !java.nio.file.Files.isSymbolicLink(directory.toPath()) &&
+                        runCatching { directory.canonicalFile.toPath().startsWith(workspacePath) }.getOrDefault(false)
+                )
+            }
+            .filter {
+                it.isFile &&
+                    !isInternalRuntimePath(it.relativeTo(workspace).invariantSeparatorsPath) &&
+                    !java.nio.file.Files.isSymbolicLink(it.toPath())
+            }
+            .forEach { source ->
+                val relative = source.relativeTo(workspace).invariantSeparatorsPath
+                val destination = safeWorkspaceFile(snapshotFolder, relative)
+                destination.parentFile?.mkdirs()
+                source.copyTo(destination, overwrite = true)
+            }
+
+        val finalVersion = ProjectVersion(
+            versionTag = tag,
+            versionNumber = nextNumber,
+            timestamp = System.currentTimeMillis(),
+            changedPaths = normalizedPaths,
+        )
+        val updatedVersions = existing.filterNot { it.versionNumber == nextNumber } + finalVersion
+        val manifest = File(versionsDir(projectId), "versions.json")
+        manifest.parentFile?.mkdirs()
+        val array = JSONArray().apply {
+            updatedVersions.forEach { v ->
+                put(JSONObject().apply {
+                    put("versionTag", v.versionTag)
+                    put("versionNumber", v.versionNumber)
+                    put("timestamp", v.timestamp)
+                    put("changedPaths", JSONArray(v.changedPaths))
+                })
+            }
+        }
+        manifest.writeText(array.toString())
+        writeVersionZip(snapshotFolder, File(versionsDir(projectId), "v$nextNumber/project.zip"))
+        return finalVersion
+    }
+
+    fun writeVersionZip(snapshotFolder: File, destinationZip: File) {
+        destinationZip.parentFile?.mkdirs()
+        val tempZip = File(destinationZip.parentFile, "${destinationZip.name}.tmp")
+        runCatching {
+            tempZip.outputStream().buffered().use { out ->
+                java.util.zip.ZipOutputStream(out).use { zip ->
+                    snapshotFolder.walkTopDown()
+                        .filter { it.isFile }
+                        .forEach { file ->
+                            val relative = file.relativeTo(snapshotFolder).invariantSeparatorsPath
+                            zip.putNextEntry(java.util.zip.ZipEntry(relative).apply { time = file.lastModified() })
+                            file.inputStream().buffered().use { it.copyTo(zip) }
+                            zip.closeEntry()
+                        }
+                }
+            }
+            tempZip.renameTo(destinationZip)
+        }.onFailure {
+            tempZip.delete()
+        }
+    }
+
+    fun getVersionZip(projectId: String, versionNumber: Int): File =
+        File(versionsDir(projectId), "v$versionNumber/project.zip")
+
+    fun getLatestVersionZip(projectId: String): File? {
+        val latest = loadVersions(projectId).lastOrNull() ?: return null
+        val zip = getVersionZip(projectId, latest.versionNumber)
+        return if (zip.isFile) zip else null
+    }
+
+    fun recordVersionSnapshot(projectId: String, workspace: File, changedPaths: List<String>): ProjectVersion {
+        val existing = loadVersions(projectId)
+        val nextNumber = existing.size + 1
+        val tag = "V1.${nextNumber - 1}"
+        val snapshotFolder = File(versionsDir(projectId), "v$nextNumber/project").apply { mkdirs() }
+        val workspacePath = workspace.canonicalFile.toPath()
+
+        workspace.walkTopDown()
+            .onEnter { directory ->
+                directory == workspace || (
+                    !java.nio.file.Files.isSymbolicLink(directory.toPath()) &&
+                        runCatching { directory.canonicalFile.toPath().startsWith(workspacePath) }.getOrDefault(false)
+                )
+            }
+            .filter {
+                it.isFile &&
+                    !isInternalRuntimePath(it.relativeTo(workspace).invariantSeparatorsPath) &&
+                    !java.nio.file.Files.isSymbolicLink(it.toPath())
+            }
+            .forEach { source ->
+                val relative = source.relativeTo(workspace).invariantSeparatorsPath
+                val destination = safeWorkspaceFile(snapshotFolder, relative)
+                destination.parentFile?.mkdirs()
+                source.copyTo(destination, overwrite = true)
+            }
+
+        val normalizedPaths = changedPaths
+            .map { normalizeRelativePath(workspace, it) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+        val newVersion = ProjectVersion(
+            versionTag = tag,
+            versionNumber = nextNumber,
+            timestamp = System.currentTimeMillis(),
+            changedPaths = normalizedPaths,
+        )
+        val updatedVersions = existing + newVersion
+        val manifest = File(versionsDir(projectId), "versions.json")
+        manifest.parentFile?.mkdirs()
+        val array = JSONArray().apply {
+            updatedVersions.forEach { v ->
+                put(JSONObject().apply {
+                    put("versionTag", v.versionTag)
+                    put("versionNumber", v.versionNumber)
+                    put("timestamp", v.timestamp)
+                    put("changedPaths", JSONArray(v.changedPaths))
+                })
+            }
+        }
+        manifest.writeText(array.toString())
+        writeVersionZip(snapshotFolder, File(versionsDir(projectId), "v$nextNumber/project.zip"))
+        return newVersion
+    }
+
+    fun getFileVersions(projectId: String): Map<String, String> {
+        val versions = loadVersions(projectId)
+        val result = mutableMapOf<String, String>()
+        versions.forEach { version ->
+            version.changedPaths.forEach { path ->
+                val normalized = path.replace('\\', '/').trimStart('/')
+                result[normalized] = version.versionTag
+            }
+        }
+        return result
+    }
+
+    fun getLatestVersionTag(projectId: String): String {
+        return loadVersions(projectId).lastOrNull()?.versionTag ?: "V1.0"
+    }
+
+    fun getLatestChangedFiles(projectId: String): Set<String> {
+        return loadVersions(projectId).lastOrNull()?.changedPaths?.map { it.replace('\\', '/').trimStart('/') }?.toSet() ?: emptySet()
+    }
+
+    fun createCheckpoint(projectId: String, workspace: File) {
+        val checkpoint = checkpointDir(projectId)
+        // Keep the original baseline until every pending file is accepted or undone.
+        if (File(checkpoint, "project").isDirectory && File(checkpoint, "changes.json").isFile) return
+        checkpoint.deleteRecursively()
+        val backup = File(checkpoint, "project").apply { mkdirs() }
+        val workspacePath = workspace.canonicalFile.toPath()
+        workspace.walkTopDown()
+            .onEnter { directory ->
+                directory == workspace || (
+                    !java.nio.file.Files.isSymbolicLink(directory.toPath()) &&
+                        runCatching { directory.canonicalFile.toPath().startsWith(workspacePath) }.getOrDefault(false)
+                    )
+            }
+            .filter {
+                it.isFile &&
+                    !isInternalRuntimePath(it.relativeTo(workspace).invariantSeparatorsPath) &&
+                    !java.nio.file.Files.isSymbolicLink(it.toPath())
+            }
+            .forEach { source ->
+                val relative = source.relativeTo(workspace).invariantSeparatorsPath
+                val destination = safeWorkspaceFile(backup, relative)
+                destination.parentFile?.mkdirs()
+                source.copyTo(destination, overwrite = true)
+            }
+    }
+
+    fun saveChangedPaths(projectId: String, paths: List<String>) {
+        val manifest = File(checkpointDir(projectId), "changes.json")
+        manifest.parentFile?.mkdirs()
+        val merged = (readChangedPaths(projectId) + paths)
+            .filterNot(::isInternalRuntimePath)
+            .distinct()
+            .sorted()
+        manifest.writeText(JSONArray(merged).toString())
+    }
+
+    fun readChangedPaths(projectId: String): List<String> {
+        val manifest = File(checkpointDir(projectId), "changes.json")
+        if (!manifest.isFile) return emptyList()
+        return runCatching {
+            val array = JSONArray(manifest.readText())
+            (0 until array.length()).map(array::getString)
+        }.getOrDefault(emptyList())
+    }
+
+    fun removeChangedPath(projectId: String, path: String) {
+        val remaining = readChangedPaths(projectId).filterNot { it == path }
+        if (remaining.isEmpty()) {
+            checkpointDir(projectId).deleteRecursively()
+        } else {
+            File(checkpointDir(projectId), "changes.json").writeText(JSONArray(remaining).toString())
+        }
+    }
+
+    fun buildChangeDetails(projectId: String, workspace: File, paths: List<String>): List<ChangeItem> {
+        val backup = File(checkpointDir(projectId), "project")
+        return paths.map { path ->
+            val before = safeWorkspaceFile(backup, path).takeIf(File::isFile)?.readBytes() ?: ByteArray(0)
+            val after = safeWorkspaceFile(workspace, path).takeIf(File::isFile)?.readBytes() ?: ByteArray(0)
+            val binary = before.any { it == 0.toByte() } || after.any { it == 0.toByte() }
+            val (additions, deletions) = lineChanges(before, after)
+            ChangeItem(
+                path = path,
+                additions = additions,
+                deletions = deletions,
+                diffLines = buildDiffLines(before, after),
+                binary = binary,
+            )
+        }
+    }
+
+    fun buildDiffLines(beforeBytes: ByteArray, afterBytes: ByteArray): List<DiffLine> {
+        if (beforeBytes.any { it == 0.toByte() } || afterBytes.any { it == 0.toByte() }) {
+            return listOf(DiffLine(DiffLineType.INFO, "Binary file changed"))
+        }
+        val before = textLines(beforeBytes)
+        val after = textLines(afterBytes)
+        if (before.size > MAX_RENDERED_DIFF_LINES || after.size > MAX_RENDERED_DIFF_LINES) {
+            return listOf(
+                DiffLine(
+                    DiffLineType.INFO,
+                    "Diff is too large to display (${before.size} → ${after.size} lines). Undo and Keep still work.",
+                ),
+            )
+        }
+
+        val lcs = Array(before.size + 1) { IntArray(after.size + 1) }
+        for (oldIndex in before.lastIndex downTo 0) {
+            for (newIndex in after.lastIndex downTo 0) {
+                lcs[oldIndex][newIndex] = if (before[oldIndex] == after[newIndex]) {
+                    lcs[oldIndex + 1][newIndex + 1] + 1
+                } else {
+                    maxOf(lcs[oldIndex + 1][newIndex], lcs[oldIndex][newIndex + 1])
+                }
+            }
+        }
+
+        val result = mutableListOf<DiffLine>()
+        var oldIndex = 0
+        var newIndex = 0
+        while (oldIndex < before.size || newIndex < after.size) {
+            when {
+                oldIndex < before.size && newIndex < after.size && before[oldIndex] == after[newIndex] -> {
+                    result += DiffLine(DiffLineType.CONTEXT, before[oldIndex], oldIndex + 1, newIndex + 1)
+                    oldIndex++
+                    newIndex++
+                }
+                newIndex < after.size && (oldIndex == before.size || lcs[oldIndex][newIndex + 1] >= lcs[oldIndex + 1][newIndex]) -> {
+                    result += DiffLine(DiffLineType.ADDITION, after[newIndex], null, newIndex + 1)
+                    newIndex++
+                }
+                oldIndex < before.size -> {
+                    result += DiffLine(DiffLineType.DELETION, before[oldIndex], oldIndex + 1, null)
+                    oldIndex++
+                }
+            }
+        }
+        return collapseUnchangedLines(result)
+    }
+
+    private fun collapseUnchangedLines(lines: List<DiffLine>): List<DiffLine> {
+        val changedIndexes = lines.indices.filter { lines[it].type != DiffLineType.CONTEXT }
+        if (changedIndexes.isEmpty()) return lines
+        val visible = BooleanArray(lines.size)
+        changedIndexes.forEach { changed ->
+            for (index in maxOf(0, changed - DIFF_CONTEXT_LINES)..minOf(lines.lastIndex, changed + DIFF_CONTEXT_LINES)) {
+                visible[index] = true
+            }
+        }
+        val result = mutableListOf<DiffLine>()
+        var index = 0
+        while (index < lines.size) {
+            if (visible[index]) {
+                result += lines[index++]
+            } else {
+                val start = index
+                while (index < lines.size && !visible[index]) index++
+                result += DiffLine(DiffLineType.INFO, "… ${index - start} unchanged lines …")
+            }
+        }
+        return result
+    }
+
+    private fun lineChanges(beforeBytes: ByteArray, afterBytes: ByteArray): Pair<Int, Int> {
+        if (beforeBytes.any { it == 0.toByte() } || afterBytes.any { it == 0.toByte() }) {
+            return (if (afterBytes.isNotEmpty()) 1 else 0) to (if (beforeBytes.isNotEmpty()) 1 else 0)
+        }
+        val before = textLines(beforeBytes)
+        val after = textLines(afterBytes)
+        if (before.size > MAX_DIFF_LINES || after.size > MAX_DIFF_LINES) {
+            return maxOf(0, after.size - before.size) to maxOf(0, before.size - after.size)
+        }
+        var previous = IntArray(after.size + 1)
+        before.forEach { oldLine ->
+            val current = IntArray(after.size + 1)
+            after.forEachIndexed { index, newLine ->
+                current[index + 1] = if (oldLine == newLine) {
+                    previous[index] + 1
+                } else {
+                    maxOf(previous[index + 1], current[index])
+                }
+            }
+            previous = current
+        }
+        val common = previous[after.size]
+        return (after.size - common) to (before.size - common)
+    }
+
+    private fun textLines(bytes: ByteArray): List<String> {
+        if (bytes.isEmpty()) return emptyList()
+        val lines = bytes.decodeToString().split('\n')
+        return if (lines.lastOrNull().isNullOrEmpty()) lines.dropLast(1) else lines
+    }
+
+    fun safeWorkspaceFile(root: File, relative: String): File {
+        require(relative.isNotBlank() && !relative.startsWith('/')) { "Unsafe workspace path" }
+        val file = File(root, relative)
+        val rootPath = root.canonicalFile.toPath()
+        val parentPath = (file.parentFile ?: root).canonicalFile.toPath()
+        require(parentPath.startsWith(rootPath)) { "Workspace path escapes project" }
+        return file
+    }
+
+    fun snapshot(root: File): Map<String, String> = root.walkTopDown()
+        .filter { it.isFile && !isInternalRuntimePath(it.relativeTo(root).invariantSeparatorsPath) }
+        .associate { it.relativeTo(root).path to digest(it) }
+
+    fun changedFiles(root: File, before: Map<String, String>): List<String> {
+        val after = snapshot(root)
+        return (before.keys + after.keys).distinct().filter { before[it] != after[it] }.sorted()
+    }
+
+    fun isInternalRuntimePath(path: String): Boolean {
+        val normalized = path.replace('\\', '/')
+        return normalized == ".claude" || normalized == ".claude.json" || normalized.startsWith(".claude/")
+    }
+
+    private fun digest(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    companion object {
+        private const val MAX_DIFF_LINES = 2_000
+        private const val MAX_RENDERED_DIFF_LINES = 600
+        private const val DIFF_CONTEXT_LINES = 3
+    }
+}
