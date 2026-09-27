@@ -9080,7 +9080,10 @@ private fun MessageBubble(
                         Text(
                             text = message.text,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                lineHeight = 22.sp,
+                                fontFamily = com.jarves.mh.ui.theme.ChatFontFamily,
+                            ),
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
                     }
