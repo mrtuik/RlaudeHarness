@@ -87,7 +87,7 @@ fun MarkdownText(
                 is MarkdownBlock.Paragraph -> {
                     Text(
                         text = formatInlineMarkdown(block.text),
-                        style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 21.sp),
                         color = color,
                     )
                 }
@@ -99,9 +99,9 @@ fun MarkdownText(
 @Composable
 private fun HeaderBlock(header: MarkdownBlock.Header) {
     val style = when (header.level) {
-        1 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp)
-        2 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 19.sp)
-        else -> MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+        1 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 26.sp)
+        2 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 21.sp)
+        else -> MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
     }
     Text(
         text = formatInlineMarkdown(header.text),
@@ -127,7 +127,7 @@ private fun BulletBlock(item: MarkdownBlock.BulletItem, color: Color) {
         )
         Text(
             text = formatInlineMarkdown(item.text),
-            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 21.sp),
             color = color,
             modifier = Modifier.weight(1f),
         )
@@ -147,7 +147,7 @@ private fun NumberedBlock(item: MarkdownBlock.NumberedItem, color: Color) {
         )
         Text(
             text = formatInlineMarkdown(item.text),
-            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 21.sp),
             color = color,
             modifier = Modifier.weight(1f),
         )
@@ -274,7 +274,7 @@ private fun CodeSnippetBlock(block: MarkdownBlock.CodeBlock, onRunCode: ((String
 
 @Composable
 private fun formatInlineMarkdown(text: String): AnnotatedString {
-    val codeBg = MaterialTheme.colorScheme.surfaceVariant
+    val codeBg = Color(0xFFF3F4F6)
     val codeColor = PocketAccent
     val primaryColor = MaterialTheme.colorScheme.primary
 
