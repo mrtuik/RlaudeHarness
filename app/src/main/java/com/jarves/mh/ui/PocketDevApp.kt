@@ -4483,6 +4483,7 @@ private fun WorkspaceScreen(
             filePath = state.openedFilePath,
             content = state.openedFileContent,
             loading = state.fileContentLoading,
+            fileRoot = attachmentRoot,
             onClose = {
                 onCloseFile()
                 selectedTab = WorkspaceTab.FILES
@@ -4849,17 +4850,36 @@ private fun FileViewerScreen(
     filePath: String,
     content: String?,
     loading: Boolean,
+    fileRoot: java.io.File?,
     onClose: () -> Unit,
     onRename: ((String) -> Unit)? = null,
 ) {
     val fileName = filePath.substringAfterLast('/')
     val ext = fileName.substringAfterLast('.', "")
     val isMarkdown = ext == "md"
+    val isPreviewable = PreviewEntryResolver.isPreviewable(fileName)
+    val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameDraft by remember(showRenameDialog, fileName) { mutableStateOf(fileName) }
+
+    // Single-file preview: spin up a static server rooted at the file's own
+    // folder so relative assets (css/js/images next to it) still resolve.
+    var previewServer by remember { mutableStateOf<StaticPreviewServer?>(null) }
+    DisposableEffect(Unit) {
+        onDispose { previewServer?.close() }
+    }
+    val startPreview: () -> Unit = start@{
+        val resolved = resolveWorkspaceFile(fileRoot, filePath, context) ?: run {
+            Toast.makeText(context, "Couldn't read $fileName", Toast.LENGTH_SHORT).show()
+            return@start
+        }
+        previewServer?.close()
+        previewServer = StaticPreviewServer(resolved.parentFile ?: resolved).start()
+    }
 
     Scaffold(
         topBar = {
@@ -4874,38 +4894,81 @@ private fun FileViewerScreen(
                     IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close file") }
                 },
                 actions = {
-                    if (onRename != null) {
-                        IconButton(onClick = {
-                            renameDraft = fileName
-                            showRenameDialog = true
-                        }) {
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
                             Icon(
-                                imageVector = ImageVector.vectorResource(R.drawable.ic_write),
-                                contentDescription = "Rename file",
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "File options",
                                 tint = Color.Black,
-                                modifier = Modifier.size(18.dp),
                             )
                         }
-                    }
-                    if (!content.isNullOrEmpty()) {
-                        IconButton(onClick = {
-                            clipboard.setText(AnnotatedString(content))
-                            copied = true
-                            scope.launch { delay(2000); copied = false }
-                        }) {
-                            if (copied) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    "File contents copied",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp),
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                            containerColor = Color.White,
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            if (isPreviewable) {
+                                DropdownMenuItem(
+                                    text = { Text("Preview") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.Preview,
+                                            contentDescription = null,
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    },
+                                    onClick = {
+                                        menuOpen = false
+                                        startPreview()
+                                    },
                                 )
-                            } else {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_custom_copy),
-                                    contentDescription = "Copy file contents",
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(18.dp),
+                            }
+                            if (!content.isNullOrEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("Copy") },
+                                    leadingIcon = {
+                                        if (copied) {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        } else {
+                                            Icon(
+                                                painter = painterResource(R.drawable.ic_custom_copy),
+                                                contentDescription = null,
+                                                tint = Color.Black,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        menuOpen = false
+                                        clipboard.setText(AnnotatedString(content))
+                                        copied = true
+                                        scope.launch { delay(2000); copied = false }
+                                    },
+                                )
+                            }
+                            if (onRename != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Edit") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = ImageVector.vectorResource(R.drawable.ic_write),
+                                            contentDescription = null,
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    },
+                                    onClick = {
+                                        menuOpen = false
+                                        renameDraft = fileName
+                                        showRenameDialog = true
+                                    },
                                 )
                             }
                         }
@@ -5011,6 +5074,20 @@ private fun FileViewerScreen(
                 }
             }
         }
+    }
+
+    val activeServer = previewServer
+    if (activeServer != null) {
+        val entry = WorkspaceEntry(path = fileName, name = fileName, isDirectory = false, depth = 0)
+        ArchivePreviewSheet(
+            previewableFiles = listOf(entry),
+            initialEntry = entry,
+            server = activeServer,
+            onDismiss = {
+                previewServer?.close()
+                previewServer = null
+            },
+        )
     }
 }
 
@@ -5406,6 +5483,23 @@ private fun ZipContentsScreen(
                             containerColor = Color.White,
                             shape = RoundedCornerShape(14.dp),
                         ) {
+                            if (PreviewEntryResolver.findEntryFile(files) != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Preview") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.Preview,
+                                            contentDescription = null,
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    },
+                                    onClick = {
+                                        zipMenuOpen = false
+                                        startPreview()
+                                    },
+                                )
+                            }
                             if (onRenameZip != null) {
                                 DropdownMenuItem(
                                     text = { Text("Rename") },
@@ -5569,7 +5663,6 @@ private fun ZipContentsScreen(
                                         }
                                     }
                                 },
-                                onPreview = if (PreviewEntryResolver.isPreviewable(entry.name)) startPreview else null,
                             )
                         }
                         HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 0.8.dp)
@@ -5622,6 +5715,69 @@ private fun ZipContentsScreen(
             },
             shape = RoundedCornerShape(4.dp),
         )
+    }
+}
+
+@Composable
+private fun VersionZipCard(
+    modifier: Modifier = Modifier,
+    zipName: String,
+    fileLabel: String,
+    versionTag: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = modifier
+            .aspectRatio(1f)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            SquareZipIcon(modifier = Modifier.size(26.dp), tint = Color.Black)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = zipName,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.Black,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Surface(shape = RoundedCornerShape(4.dp), color = Color.Black) {
+                        Text(
+                            text = fileLabel,
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color.White,
+                        border = BorderStroke(1.dp, Color(0xFFD1D5DB)),
+                    ) {
+                        Text(
+                            text = versionTag,
+                            color = Color.Black,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -5845,74 +6001,26 @@ private fun FilesTab(
 
             if (projectVersions.isNotEmpty()) {
                 val sortedVersions = projectVersions.sortedByDescending { it.versionNumber }
-                items(sortedVersions, key = { "version-${it.versionNumber}" }) { version ->
-                    val count = if (version.filesCount > 0) version.filesCount else files.count { !it.isDirectory }
-                    val fileLabel = if (count == 1) "1 file" else "$count files"
-                    val versionTag = version.versionTag.lowercase()
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenVersionZip(version, "${projectSlug}.zip") },
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color.White,
-                        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
-                        shadowElevation = 0.dp,
-                        tonalElevation = 0.dp,
+                val versionRows = sortedVersions.chunked(2)
+                items(versionRows, key = { row -> "version-row-${row.first().versionNumber}" }) { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            SquareZipIcon(
-                                modifier = Modifier.size(22.dp),
-                                tint = Color.Black,
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                text = "${projectSlug}.zip",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color.Black,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                        row.forEach { version ->
+                            val count = if (version.filesCount > 0) version.filesCount else files.count { !it.isDirectory }
+                            val fileLabel = if (count == 1) "1 file" else "$count files"
+                            val versionTag = version.versionTag.lowercase()
+                            VersionZipCard(
                                 modifier = Modifier.weight(1f),
+                                zipName = "${projectSlug}.zip",
+                                fileLabel = fileLabel,
+                                versionTag = versionTag,
+                                onClick = { onOpenVersionZip(version, "${projectSlug}.zip") },
                             )
-                            Spacer(Modifier.width(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = Color.Black,
-                            ) {
-                                Text(
-                                    text = fileLabel,
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
-                                )
-                            }
-                            Spacer(Modifier.width(6.dp))
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = Color.White,
-                                border = BorderStroke(1.dp, Color(0xFFD1D5DB)),
-                            ) {
-                                Text(
-                                    text = versionTag,
-                                    color = Color.Black,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = "Open zip contents",
-                                modifier = Modifier.size(18.dp),
-                                tint = Color(0xFF9CA3AF),
-                            )
+                        }
+                        if (row.size == 1) {
+                            Spacer(Modifier.weight(1f))
                         }
                     }
                 }
@@ -6037,28 +6145,21 @@ private fun RootWorkspaceFileRow(
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameText by remember(entry.name) { mutableStateOf(entry.name) }
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable {
-                if (entry.isDirectory) {
-                    onToggleFolder()
-                } else {
-                    onOpenFile()
-                }
-            },
-        shape = RoundedCornerShape(8.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
-        shadowElevation = 0.dp,
-        tonalElevation = 0.dp,
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 46.dp)
+                .clickable {
+                    if (entry.isDirectory) {
+                        onToggleFolder()
+                    } else {
+                        onOpenFile()
+                    }
+                }
                 .padding(
-                    start = (14 + entry.depth * 10).coerceAtMost(38).dp,
-                    end = 14.dp,
+                    start = (4 + entry.depth * 10).coerceAtMost(28).dp,
+                    end = 4.dp,
                     top = 10.dp,
                     bottom = 10.dp,
                 ),
@@ -6139,6 +6240,7 @@ private fun RootWorkspaceFileRow(
                 )
             }
         }
+        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 0.8.dp)
     }
 
     if (showRenameDialog) {
