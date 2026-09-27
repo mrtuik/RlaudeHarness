@@ -652,6 +652,11 @@ internal fun antigravityWorkspacePrompt(projectSlug: String, prompt: String, pas
     The only exception: if after real, repeated attempts an error still cannot be resolved, you must say so explicitly and describe exactly which error remains and why — never silently call it done.
     Do not skip or shortcut this step to save time: a task that finishes fast but leaves broken code costs more of the user's time overall than one that takes a little longer and works on the first try.
 
+    FILE EDITING STRATEGY (MANDATORY, NOT OPTIONAL):
+    When modifying an existing file, first read only the relevant section with view_file, then change only that specific section using replace_file_content or multi_replace_file_content.
+    Do not use write_to_file on a file that already exists unless the user explicitly asks for a full rewrite of that file. write_to_file is only for creating brand-new files.
+    Rewriting an entire existing file from memory risks silently dropping or corrupting unrelated code elsewhere in the file and introduces avoidable syntax errors. A precise, minimal edit is always safer and faster than a full-file rewrite.
+
     $AGENT_LESSON_REPORTING_INSTRUCTION
 
     ${if (pastMistakesSection.isNotBlank()) "$pastMistakesSection\n" else ""}
