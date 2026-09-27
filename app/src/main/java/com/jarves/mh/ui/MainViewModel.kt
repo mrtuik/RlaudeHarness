@@ -284,6 +284,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = AppPreferences(application)
     private val checkpoints = com.jarves.mh.runtime.WorkspaceCheckpoints(application.filesDir)
     private var versionFinalizedForCurrentTurn: Boolean = false
+    // Part 1: "Work" version-chain scope ids (see WorkspaceCheckpoints.resolveScope) for
+    // which prepareNextVersion() has been lazily kicked off during the current turn — used
+    // so a scope touched only by a read (no eventual write) still gets its pending snapshot
+    // cleaned up when the turn finalizes.
+    private var touchedArchiveScopesThisTurn: Set<String> = emptySet()
     private val lessonsRepository = LessonsRepository(preferences)
     private val gitHubLessonReporter = GitHubLessonReporter()
     private val claudeRuntime = ClaudeRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
@@ -3667,6 +3672,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         updateActiveChatTitle(requestText)
         preferences.clearDraft(project.id, currentChatId)
         versionFinalizedForCurrentTurn = false
+        touchedArchiveScopesThisTurn = emptySet()
         val root = projectWorkspaceRoot(project)
         viewModelScope.launch(Dispatchers.IO) {
             checkpoints.prepareNextVersion(project.id, root)
@@ -4049,6 +4055,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             combined.contains("Task completed", true)
     }
 
+    /**
+     * Best-effort extraction of the workspace-relative path a Write/Edit/Read/Bash tool
+     * call targets, from its human-readable `detail` string — same convention already used
+     * by [collectTurnChangedPaths]/[extractTurnChangedPaths] (`"summary · path"` for file
+     * tools). Returns null when no path can be confidently recovered (e.g. most Bash
+     * commands, Glob/Grep, questions) — those tool calls simply show no version context.
+     */
+    private fun extractToolTargetPath(toolName: String, detail: String): String? {
+        val raw = detail.trim().trim('`')
+        if (raw.isBlank()) return null
+        return when (toolName) {
+            "Write", "Edit", "Read", "NotebookEdit",
+            "write_to_file", "replace_file_content", "multi_replace_file_content" -> {
+                val candidate = if (raw.contains(" · ")) raw.substringAfter(" · ").trim() else raw
+                candidate.ifBlank { null }
+            }
+            "Bash" -> Regex("""[>]{1,2}\s*([^\s|;&]+)""").find(raw)
+                ?.groupValues?.get(1)?.trim('`', '"', '\'')?.ifBlank { null }
+            else -> null
+        }
+    }
+
+    /**
+     * Part 1: attaches read/write version context to a just-started tool-call [item], if its
+     * target path resolves to a known version chain (Root, or an imported archive's own
+     * Work chain). Lazily kicks off that chain's pending version the first time it's touched
+     * this turn — Root's pending version is already prepared up front in [sendPrompt].
+     */
+    private fun withVersionContext(item: ActivityItem, project: Project): ActivityItem {
+        val toolName = item.title.removePrefix("Running ")
+        val targetPath = extractToolTargetPath(toolName, item.detail) ?: return item
+        val root = projectWorkspaceRoot(project)
+        val relative = checkpoints.normalizeRelativePath(root, targetPath)
+        if (relative.isBlank() || checkpoints.isInternalRuntimePath(relative)) return item
+        val scope = checkpoints.resolveScope(project.id, relative)
+        if (scope.label == "Work" && scope.scopeId !in touchedArchiveScopesThisTurn) {
+            val archiveRoot = File(root, scope.scopeRoot)
+            checkpoints.prepareNextVersion(scope.scopeId, archiveRoot)
+            touchedArchiveScopesThisTurn = touchedArchiveScopesThisTurn + scope.scopeId
+        }
+        return item.copy(
+            contextLabel = scope.label,
+            archiveName = scope.archiveName,
+            readVersionTag = checkpoints.currentVersionTag(scope.scopeId),
+            writeVersionTag = checkpoints.pendingVersionTag(scope.scopeId),
+        )
+    }
+
     private fun toolPlanSummary(toolName: String, detail: String): String {
         val clean = detail.replace(Regex("\\s+"), " ").trim()
         val short = clean.take(90).ifBlank { "the current project" }
@@ -4115,13 +4169,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun finalizeTurnVersionIfNeeded(project: Project, changedPaths: List<String>) {
         if (versionFinalizedForCurrentTurn) return
+        versionFinalizedForCurrentTurn = true
         val root = projectWorkspaceRoot(project)
-        if (changedPaths.isNotEmpty()) {
-            versionFinalizedForCurrentTurn = true
-            checkpoints.finalizeVersion(project.id, root, changedPaths)
+        val normalized = changedPaths
+            .map { checkpoints.normalizeRelativePath(root, it) }
+            .filter { it.isNotBlank() && !checkpoints.isInternalRuntimePath(it) }
+            .distinct()
+        val byScope = normalized.groupBy { checkpoints.resolveScope(project.id, it) }
+
+        // Root always has a pending snapshot (prepared at turn start in sendPrompt) — resolve
+        // or discard it exactly as before.
+        val rootPaths = byScope.entries.firstOrNull { it.key.label == "Root" }?.value.orEmpty()
+        if (rootPaths.isNotEmpty()) {
+            checkpoints.finalizeVersion(project.id, root, rootPaths)
         } else {
             checkpoints.discardPendingVersion(project.id)
         }
+
+        // Each imported archive that was actually written to this turn gets its own
+        // independent version finalized, scoped only to that archive's own subfolder.
+        byScope.entries.filter { it.key.label == "Work" }.forEach { (scope, paths) ->
+            val archiveRoot = File(root, scope.scopeRoot)
+            val relativeToArchive = paths.mapNotNull { path ->
+                val prefix = "${scope.scopeRoot}/"
+                if (path.startsWith(prefix)) path.removePrefix(prefix) else null
+            }
+            if (relativeToArchive.isNotEmpty()) {
+                checkpoints.finalizeVersion(scope.scopeId, archiveRoot, relativeToArchive)
+            }
+        }
+
+        // Any archive that was only read from (its chain was prepared but nothing in it
+        // ended up in the final changed-paths list) still needs its pending slot cleared.
+        val writtenScopeIds = byScope.keys.filter { it.label == "Work" }.map { it.scopeId }.toSet()
+        touchedArchiveScopesThisTurn.filterNot { it in writtenScopeIds }.forEach { scopeId ->
+            checkpoints.discardPendingVersion(scopeId)
+        }
+        touchedArchiveScopesThisTurn = emptySet()
     }
 
     private fun finishWorkSegment(current: AppUiState, finishedAt: Long = System.currentTimeMillis()): AppUiState {
@@ -4271,20 +4355,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 is RuntimeEvent.ToolStarted -> {
+                    val baseItem = ActivityItem("Running ${event.toolName}", event.detail, false, isCommand = event.toolName == "Bash")
+                    val item = current.activeProject?.let { withVersionContext(baseItem, it) } ?: baseItem
                     val planned = current.copy(
-                        liveProcess = current.liveProcess.map { item ->
-                            if (!item.isComplete) item.copy(isComplete = true) else item
+                        liveProcess = current.liveProcess.map { i ->
+                            if (!i.isComplete) i.copy(isComplete = true) else i
                         },
                         liveThinking = false,
                         activeThinkingBlockId = null,
-                        activity = listOf(
-                            ActivityItem("Running ${event.toolName}", event.detail, false, isCommand = event.toolName == "Bash"),
-                        ) + current.activity.map { if (!it.isComplete) it.copy(isComplete = true) else it },
+                        activity = listOf(item) + current.activity.map { if (!it.isComplete) it.copy(isComplete = true) else it },
                     )
-                    appendWorkItem(
-                        planned,
-                        ActivityItem("Running ${event.toolName}", event.detail, false, isCommand = event.toolName == "Bash"),
-                    )
+                    appendWorkItem(planned, item)
                 }
                 is RuntimeEvent.RuntimeLog -> appendWorkItem(
                     current.copy(activity = listOf(ActivityItem(event.title, event.detail)) + current.activity),
@@ -4316,10 +4397,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val process = if (runningIndex >= 0) {
                         current.liveProcess.toMutableList().also { items ->
                             val runningItem = items[runningIndex]
+                            // Carry the read/write version context computed at ToolStarted onto
+                            // the completed item so it still shows in the result's detail block.
                             items[runningIndex] = ActivityItem(
                                 "${event.toolName} completed",
                                 runningItem.detail.ifBlank { event.summary },
                                 isCommand = event.toolName == "Bash",
+                                contextLabel = runningItem.contextLabel,
+                                archiveName = runningItem.archiveName,
+                                readVersionTag = runningItem.readVersionTag,
+                                writeVersionTag = runningItem.writeVersionTag,
                             )
                         }
                     } else {
