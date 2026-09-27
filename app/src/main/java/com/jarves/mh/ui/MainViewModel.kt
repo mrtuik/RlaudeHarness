@@ -3538,6 +3538,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return clean.ifBlank { "attachment-${UUID.randomUUID().toString().take(8)}" }
     }
 
+    private fun isTextAttachment(attachment: ChatAttachment): Boolean {
+        val mime = attachment.mimeType.lowercase()
+        if (mime.startsWith("text/") || mime == "application/json" || mime == "application/xml" ||
+            mime.endsWith("+json") || mime.endsWith("+xml")) {
+            return true
+        }
+        val ext = attachment.displayName.substringAfterLast('.', "").lowercase()
+        val textExtensions = setOf(
+            "txt", "md", "markdown", "json", "jsonl", "csv", "tsv", "xml", "yaml", "yml", "log",
+            "kt", "kts", "java", "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "html", "htm",
+            "css", "scss", "sass", "less", "c", "cc", "cpp", "h", "hpp", "sh", "bash", "zsh",
+            "gradle", "properties", "toml", "ini", "conf", "sql",
+        )
+        return ext in textExtensions
+    }
+
     fun sendPrompt(prompt: String) {
         val project = state.value.activeProject ?: return
         if (_state.value.pipelineStage == PipelineStage.AWAITING_APPROVAL) return
@@ -3620,6 +3636,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 appendLine("These files were explicitly attached by the user. Inspect them only as needed for the request.")
                 appendLine("</attached_files>")
+
+                val textAttachments = attachments.filter { isTextAttachment(it) }
+                if (textAttachments.isNotEmpty()) {
+                    appendLine()
+                    appendLine("<attached_file_contents>")
+                    appendLine("The user has provided the following attached file(s) with this request. Treat their contents with high priority.")
+                    textAttachments.forEach { attachment ->
+                        val targetFile = File(root, attachment.relativePath).let { f ->
+                            if (f.exists()) f else File(attachment.relativePath)
+                        }
+                        val content = runCatching {
+                            if (targetFile.exists() && targetFile.isFile) {
+                                val raw = targetFile.readText(Charsets.UTF_8)
+                                if (raw.length > 100_000) {
+                                    raw.take(100_000) + "\n... [Content truncated: showing first 100,000 characters]"
+                                } else {
+                                    raw
+                                }
+                            } else null
+                        }.getOrNull()
+                        if (content != null) {
+                            appendLine()
+                            appendLine("--- BEGIN ATTACHMENT: ${attachment.displayName} ---")
+                            appendLine(content)
+                            appendLine("--- END ATTACHMENT: ${attachment.displayName} ---")
+                        }
+                    }
+                    appendLine("</attached_file_contents>")
+                }
             }
         }
         val startingFresh = _state.value.pipelineStage == PipelineStage.IDLE || _state.value.pipelineStage == PipelineStage.DONE
