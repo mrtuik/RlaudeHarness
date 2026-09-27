@@ -103,8 +103,8 @@ fun MarkdownText(
 @Composable
 private fun HeaderBlock(header: MarkdownBlock.Header) {
     val style = when (header.level) {
-        1 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 29.sp, fontFamily = com.jarves.mh.ui.theme.ChatFontFamily)
-        2 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp, fontFamily = com.jarves.mh.ui.theme.ChatFontFamily)
+        1 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold, fontSize = 29.sp, fontFamily = com.jarves.mh.ui.theme.ChatFontFamily)
+        2 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 24.sp, fontFamily = com.jarves.mh.ui.theme.ChatFontFamily)
         else -> MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 21.sp, fontFamily = com.jarves.mh.ui.theme.ChatFontFamily)
     }
     Text(
@@ -153,7 +153,7 @@ private fun NumberedBlock(item: MarkdownBlock.NumberedItem, color: Color) {
             style = MaterialTheme.typography.bodyMedium.copy(
                 fontSize = 17.sp,
                 lineHeight = 27.sp,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
                 fontFamily = com.jarves.mh.ui.theme.ChatFontFamily,
                 color = MaterialTheme.colorScheme.primary,
             ),
@@ -331,7 +331,7 @@ private fun formatInlineMarkdown(text: String): AnnotatedString {
                     text.startsWith("***", i) -> {
                         val end = text.indexOf("***", i + 3)
                         if (end != -1) {
-                            withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic)) {
+                            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, fontStyle = FontStyle.Italic)) {
                                 append(text.substring(i + 3, end))
                             }
                             i = end + 3
@@ -344,7 +344,7 @@ private fun formatInlineMarkdown(text: String): AnnotatedString {
                     text.startsWith("**", i) -> {
                         val end = text.indexOf("**", i + 2)
                         if (end != -1) {
-                            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
                                 append(text.substring(i + 2, end))
                             }
                             i = end + 2
@@ -356,7 +356,7 @@ private fun formatInlineMarkdown(text: String): AnnotatedString {
                     text.startsWith("__", i) -> {
                         val end = text.indexOf("__", i + 2)
                         if (end != -1) {
-                            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
                                 append(text.substring(i + 2, end))
                             }
                             i = end + 2
