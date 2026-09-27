@@ -3709,7 +3709,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 attachments.forEach { attachment ->
                     appendLine("- ${attachment.displayName}: ${projectGuestRoot(project)}/${attachment.relativePath} (${attachment.mimeType})")
                 }
-                appendLine("These files were explicitly attached by the user. Inspect them only as needed for the request.")
+                appendLine("These files were explicitly attached by the user for this request. You MUST open and inspect every one of them — especially text or .md files — before responding or making any changes, even if you believe you already understand the request from the text alone. Do not skip this step.")
                 appendLine("</attached_files>")
 
                 val textAttachments = attachments.filter { isTextAttachment(it) }
