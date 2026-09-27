@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -181,7 +182,7 @@ fun SettingsScreen(
     Scaffold(
         containerColor = settingsPageBg,
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 modifier = Modifier.padding(top = 8.dp),
                 navigationIcon = {
                     Surface(
@@ -201,7 +202,7 @@ fun SettingsScreen(
                     }
                 },
                 title = {
-                    Column {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Settings", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                         Text("Preferences & Configuration", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
