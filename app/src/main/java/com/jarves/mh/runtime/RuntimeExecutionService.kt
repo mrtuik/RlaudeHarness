@@ -5,8 +5,11 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.jarves.mh.MainActivity
 import com.jarves.mh.R
@@ -26,6 +29,7 @@ class RuntimeExecutionService : Service() {
     private var canStop: Boolean = true
     private var taskRunning: Boolean = false
     private var isForeground: Boolean = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
         super.onCreate()
@@ -33,28 +37,54 @@ class RuntimeExecutionService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // MUST be the very first thing this method does, before touching intent extras or
+        // anything else: the OS starts its "did you call startForeground() in time?" watchdog
+        // the instant startForegroundService() was invoked on the caller side, so every extra
+        // line of work here before promoting to foreground eats into that budget.
+        // justPromoted tracks whether *this* onStartCommand call is the one that performed the
+        // promotion, so a task that finishes almost instantly (ACTION_COMPLETE/FAILED/CANCELLED
+        // arriving in the very same delivery, or a fast-failing task queued right behind START)
+        // doesn't call stopForeground()/stopSelf() before the platform has fully registered the
+        // service as foreground — a known source of a *spurious*
+        // ForegroundServiceDidNotStartInTimeException even though startForeground() itself
+        // returned successfully.
+        var justPromoted = false
+        if (!isForeground) {
+            try {
+                startForeground(
+                    RUNNING_NOTIFICATION_ID,
+                    runningNotification("$notificationTitle in $projectName", includeStop = canStop),
+                )
+                isForeground = true
+                justPromoted = true
+            } catch (t: Throwable) {
+                // We could not become a real foreground service. Swallowing this silently is
+                // exactly what previously let the process limp along and then get killed by the
+                // watchdog anyway (with no clue why). Log it and stop cleanly instead — there is
+                // nothing useful we can do without foreground status.
+                Log.e(TAG, "startForeground() failed; stopping service", t)
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
+        }
+
         intent?.getStringExtra(EXTRA_PROJECT_NAME)?.takeIf(String::isNotBlank)?.let { projectName = it }
         intent?.getStringExtra(EXTRA_TITLE)?.takeIf(String::isNotBlank)?.let { notificationTitle = it }
         if (intent?.hasExtra(EXTRA_CAN_STOP) == true) canStop = intent.getBooleanExtra(EXTRA_CAN_STOP, true)
-        // The OS starts a hard timeout the moment startForegroundService() is called, regardless
-        // of which action the first delivered intent carries. If that first intent happens to be
-        // PROGRESS/COMPLETE/CANCELLED (e.g. a fast-failing task posts COMPLETE before this process
-        // has finished cold-starting) the old code could return early without ever calling
-        // startForeground(), which the OS then kills with ForegroundServiceDidNotStartInTimeException.
-        // Calling it unconditionally here, before branching on action, guarantees it always happens.
-        if (!isForeground) {
-            runCatching {
-                startForeground(
-                    RUNNING_NOTIFICATION_ID,
-                    runningNotification(
-                        intent?.getStringExtra(EXTRA_DETAIL)?.takeIf { it.isNotBlank() }
-                            ?: "$notificationTitle in $projectName",
-                        includeStop = canStop,
-                    ),
-                )
-                isForeground = true
-            }
+
+        // Now that project/title extras are known, refresh the notification we posted above with
+        // the real text (it may have been posted with stale/default values a moment ago).
+        if (justPromoted) {
+            getSystemService(NotificationManager::class.java).notify(
+                RUNNING_NOTIFICATION_ID,
+                runningNotification(
+                    intent?.getStringExtra(EXTRA_DETAIL)?.takeIf { it.isNotBlank() }
+                        ?: "$notificationTitle in $projectName",
+                    includeStop = canStop,
+                ),
+            )
         }
+
         when (intent?.action ?: ACTION_START) {
             ACTION_STOP -> {
                 RuntimeTaskController.requestStop()
@@ -77,19 +107,15 @@ class RuntimeExecutionService : Service() {
                 title = "Task completed",
                 detail = intent?.getStringExtra(EXTRA_DETAIL) ?: "Finished working in $projectName.",
                 failed = false,
+                justPromoted = justPromoted,
             )
             ACTION_FAILED -> finishTask(
                 title = "Task needs attention",
                 detail = intent?.getStringExtra(EXTRA_DETAIL) ?: "Could not finish the task in $projectName.",
                 failed = true,
+                justPromoted = justPromoted,
             )
-            ACTION_CANCELLED -> {
-                taskRunning = false
-                releaseWakeLock()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                isForeground = false
-                stopSelf()
-            }
+            ACTION_CANCELLED -> stopRuntime(justPromoted)
             else -> {
                 taskRunning = true
                 acquireWakeLock()
@@ -120,11 +146,8 @@ class RuntimeExecutionService : Service() {
         return builder.build()
     }
 
-    private fun finishTask(title: String, detail: String, failed: Boolean) {
+    private fun finishTask(title: String, detail: String, failed: Boolean, justPromoted: Boolean) {
         taskRunning = false
-        releaseWakeLock()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        isForeground = false
         val notification = NotificationCompat.Builder(this, RESULT_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
@@ -135,8 +158,39 @@ class RuntimeExecutionService : Service() {
             .setCategory(if (failed) NotificationCompat.CATEGORY_ERROR else NotificationCompat.CATEGORY_STATUS)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
-        getSystemService(NotificationManager::class.java).notify(RESULT_NOTIFICATION_ID, notification)
-        stopSelf()
+        stopRuntimeAndPost(justPromoted) {
+            getSystemService(NotificationManager::class.java).notify(RESULT_NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun stopRuntime(justPromoted: Boolean) {
+        taskRunning = false
+        stopRuntimeAndPost(justPromoted, onStopped = null)
+    }
+
+    /**
+     * Tears the service down (stopForeground + stopSelf), optionally running [onStopped] right
+     * before stopSelf(). If [justPromoted] is true — meaning this very onStartCommand delivery is
+     * the one that just called startForeground() — the actual teardown is pushed a beat onto the
+     * main looper instead of happening inline. On several OEM builds, calling stopForeground()/
+     * stopSelf() in the same event-loop pass as startForeground() races the platform's internal
+     * bookkeeping and can still surface as ForegroundServiceDidNotStartInTimeException, even
+     * though startForeground() itself succeeded. A short post-to-main gives the system time to
+     * finish registering the service as foreground first.
+     */
+    private fun stopRuntimeAndPost(justPromoted: Boolean, onStopped: (() -> Unit)?) {
+        val teardown = {
+            releaseWakeLock()
+            onStopped?.invoke()
+            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+            isForeground = false
+            stopSelf()
+        }
+        if (justPromoted) {
+            mainHandler.postDelayed(teardown, FAST_FINISH_GUARD_MS)
+        } else {
+            teardown()
+        }
     }
 
     private fun openAppIntent(): PendingIntent = PendingIntent.getActivity(
@@ -161,6 +215,7 @@ class RuntimeExecutionService : Service() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null)
         releaseWakeLock()
         super.onDestroy()
     }
@@ -184,6 +239,8 @@ class RuntimeExecutionService : Service() {
         private const val RUNNING_NOTIFICATION_ID = 41
         private const val RESULT_NOTIFICATION_ID = 42
         private const val MAX_WAKE_LOCK_MS = 90 * 60 * 1_000L
+        private const val FAST_FINISH_GUARD_MS = 300L
+        private const val TAG = "RuntimeExecutionSvc"
 
         fun ensureNotificationChannels(context: android.content.Context) {
             val manager = context.getSystemService(NotificationManager::class.java)
