@@ -8,7 +8,8 @@ import org.json.JSONObject
 
 /**
  * Offline, on-device log of mistakes the coding agents (Claude, DeepSeek, Antigravity)
- * have caught and fixed in their own generated code during self-verification.
+ * have caught and fixed in their own generated code during self-verification, AND
+ * mistakes the user explicitly pointed out that the agent then corrected.
  *
  * Every bridge shares this same SQLite file (by DB name) so a lesson learned by one
  * agent is available to all of them on the next task, regardless of which agent runs it.
@@ -19,6 +20,7 @@ data class AgentLesson(
     val fix: String,
     val language: String,
     val occurrences: Int = 1,
+    val source: String = AgentLessonsStore.SOURCE_SELF_VERIFICATION,
 )
 
 class AgentLessonsStore(context: Context) :
@@ -33,6 +35,7 @@ class AgentLessonsStore(context: Context) :
                 $COL_FIX TEXT NOT NULL,
                 $COL_LANGUAGE TEXT NOT NULL,
                 $COL_OCCURRENCES INTEGER NOT NULL DEFAULT 1,
+                $COL_SOURCE TEXT NOT NULL DEFAULT '$SOURCE_SELF_VERIFICATION',
                 $COL_CREATED_AT INTEGER NOT NULL,
                 $COL_LAST_SEEN_AT INTEGER NOT NULL,
                 UNIQUE($COL_PATTERN, $COL_LANGUAGE)
@@ -47,10 +50,16 @@ class AgentLessonsStore(context: Context) :
     }
 
     /** Insert a new lesson, or bump the occurrence count if this exact mistake was seen before. */
-    fun record(pattern: String, fix: String, language: String) {
+    fun record(
+        pattern: String,
+        fix: String,
+        language: String,
+        source: String = SOURCE_SELF_VERIFICATION,
+    ) {
         val normalizedPattern = pattern.trim().take(200)
         val normalizedFix = fix.trim().take(200)
         val normalizedLanguage = language.trim().lowercase().ifBlank { "general" }
+        val normalizedSource = source.trim().lowercase().ifBlank { SOURCE_SELF_VERIFICATION }
         if (normalizedPattern.isBlank() || normalizedFix.isBlank()) return
         val now = System.currentTimeMillis()
         runCatching {
@@ -65,8 +74,8 @@ class AgentLessonsStore(context: Context) :
                 if (found != null) {
                     val (id, count) = found
                     db.execSQL(
-                        "UPDATE $TABLE SET $COL_OCCURRENCES = ?, $COL_LAST_SEEN_AT = ?, $COL_FIX = ? WHERE $COL_ID = ?",
-                        arrayOf(count + 1, now, normalizedFix, id),
+                        "UPDATE $TABLE SET $COL_OCCURRENCES = ?, $COL_LAST_SEEN_AT = ?, $COL_FIX = ?, $COL_SOURCE = ? WHERE $COL_ID = ?",
+                        arrayOf(count + 1, now, normalizedFix, normalizedSource, id),
                     )
                 } else {
                     val values = ContentValues().apply {
@@ -74,6 +83,7 @@ class AgentLessonsStore(context: Context) :
                         put(COL_FIX, normalizedFix)
                         put(COL_LANGUAGE, normalizedLanguage)
                         put(COL_OCCURRENCES, 1)
+                        put(COL_SOURCE, normalizedSource)
                         put(COL_CREATED_AT, now)
                         put(COL_LAST_SEEN_AT, now)
                     }
@@ -86,7 +96,7 @@ class AgentLessonsStore(context: Context) :
     fun topLessons(limit: Int = 8): List<AgentLesson> = runCatching {
         readableDatabase.use { db ->
             db.rawQuery(
-                "SELECT $COL_PATTERN, $COL_FIX, $COL_LANGUAGE, $COL_OCCURRENCES FROM $TABLE " +
+                "SELECT $COL_PATTERN, $COL_FIX, $COL_LANGUAGE, $COL_OCCURRENCES, $COL_SOURCE FROM $TABLE " +
                     "ORDER BY $COL_OCCURRENCES DESC, $COL_LAST_SEEN_AT DESC LIMIT ?",
                 arrayOf(limit.toString()),
             ).use { cursor ->
@@ -97,6 +107,7 @@ class AgentLessonsStore(context: Context) :
                         fix = cursor.getString(1),
                         language = cursor.getString(2),
                         occurrences = cursor.getInt(3),
+                        source = cursor.getString(4),
                     )
                 }
                 out
@@ -121,6 +132,7 @@ class AgentLessonsStore(context: Context) :
                         pattern = json.optString("pattern"),
                         fix = json.optString("fix"),
                         language = json.optString("language"),
+                        source = json.optString("source").ifBlank { SOURCE_SELF_VERIFICATION },
                     )
                 }
             } else {
@@ -142,28 +154,36 @@ class AgentLessonsStore(context: Context) :
         sb.appendLine("KNOWN PAST MISTAKES — AVOID REPEATING THESE:")
         sb.appendLine("These are real mistakes this project's coding agents have made and fixed before, across all coding agents used in this app (not only the one running now). Do not repeat them.")
         lessons.forEach { lesson ->
-            sb.appendLine("- [${lesson.language}] ${lesson.pattern} -> ${lesson.fix}")
+            val tag = if (lesson.source == SOURCE_USER_CORRECTION) "user-corrected" else "self-caught"
+            sb.appendLine("- [${lesson.language} · $tag] ${lesson.pattern} -> ${lesson.fix}")
         }
         return sb.toString().trimEnd('\n')
     }
 
     companion object {
         private const val DB_NAME = "agent_lessons.db"
-        private const val DB_VERSION = 1
+        private const val DB_VERSION = 2
         private const val TABLE = "lessons"
         private const val COL_ID = "id"
         private const val COL_PATTERN = "pattern"
         private const val COL_FIX = "fix"
         private const val COL_LANGUAGE = "language"
         private const val COL_OCCURRENCES = "occurrences"
+        private const val COL_SOURCE = "source"
         private const val COL_CREATED_AT = "created_at"
         private const val COL_LAST_SEEN_AT = "last_seen_at"
         const val MARKER = "##LESSON##"
+        const val SOURCE_SELF_VERIFICATION = "self_verification"
+        const val SOURCE_USER_CORRECTION = "user_correction"
     }
 }
 
 /** Shared instruction text telling an agent how to report a lesson, appended to every bridge's prompt. */
 internal const val AGENT_LESSON_REPORTING_INSTRUCTION = """LESSON REPORTING (for continuous improvement across future tasks and other coding agents):
-Whenever your self-verification step catches and fixes a real syntax or compile error, immediately after fixing it, emit exactly one line with no other text on that line, in this exact format:
-##LESSON##{"pattern":"<short, general description of the mistake>","fix":"<short, general description of the correct fix>","language":"<file language, e.g. kotlin, javascript, css, html>"}
-Only emit this for genuine mistakes you actually made and fixed yourself — never for issues that were already present before you started, and never more than once per distinct mistake in this task. Keep both fields under 20 words, written generally enough to apply to similar future code, not tied to this specific file, variable, or project name. This line will be removed from what the user sees; it is only for the app's own records."""
+Emit exactly one line with no other text on that line, in this exact format, in EITHER of these two cases:
+##LESSON##{"pattern":"<short, general description of the mistake>","fix":"<short, general description of the correct fix>","language":"<file language, e.g. kotlin, javascript, css, html>","source":"<self_verification or user_correction>"}
+
+Case 1 (source: self_verification) — your self-verification step catches and fixes a real syntax or compile error you made yourself.
+Case 2 (source: user_correction) — the user explicitly points out that you made a mistake (wrong asset/icon used, an unwanted rewrite, an ignored instruction, etc.) and you correct it in this task.
+
+Only emit this for genuine mistakes you actually made — never for issues that were already present before you started, and never more than once per distinct mistake in this task. Keep pattern/fix under 20 words each, written generally enough to apply to similar future situations, not tied to this specific file, variable, or project name. This line will be removed from what the user sees; it is only for the app's own records."""
