@@ -274,7 +274,7 @@ data class AppUiState(
      * approval) before touching files. false = skip straight to the subagent workers (Tuik,
      * Harmes, Rthan) with no separate plan/approval step. Switching this never touches a task
      * that is already running — it only changes how the *next* sendPrompt() call behaves. */
-    val planModeEnabled: Boolean = true,
+    val planModeEnabled: Boolean = false,
 )
 
 private val SILENT_PIPELINE_STAGES = setOf(PipelineStage.ARCHITECT, PipelineStage.ANALYSIS, PipelineStage.BREAKDOWN)
