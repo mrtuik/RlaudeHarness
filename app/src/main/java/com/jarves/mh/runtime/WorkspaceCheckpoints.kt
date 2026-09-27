@@ -19,6 +19,21 @@ data class ProjectVersion(
 )
 
 /**
+ * Which version chain a workspace-relative path belongs to. Every path defaults to "Root"
+ * (the whole-project chain, keyed by projectId as before). A path under the conventional
+ * `.pocketdev/imports/<archiveName>/` folder used for imported archive sources belongs to
+ * that archive's own "Work" chain instead, keyed by "$projectId::work::$archiveName" and
+ * rooted at that archive's own subfolder — so Undo/versioning on an imported archive never
+ * touches (or is touched by) the rest of the project.
+ */
+data class PathScope(
+    val label: String,
+    val archiveName: String?,
+    val scopeId: String,
+    val scopeRoot: String,
+)
+
+/**
  * Workspace checkpoint / snapshot / diff store shared by agent bridges.
  *
  * Each project workspace gets a baseline copy before a session runs; after the
@@ -50,6 +65,41 @@ class WorkspaceCheckpoints(private val filesDir: File) {
     fun checkpointDir(projectId: String) = File(filesDir, "checkpoints/$projectId/latest")
 
     fun versionsDir(projectId: String) = File(filesDir, "versions/$projectId")
+
+    /** Composite key for an imported archive's independent "Work" version chain. */
+    fun archiveScopeId(projectId: String, archiveName: String) = "$projectId::work::$archiveName"
+
+    /**
+     * Resolves which version chain [relativePath] (workspace-relative) belongs to. See
+     * [PathScope] for the convention. [relativePath] with no recognizable archive prefix
+     * resolves to the ordinary Root chain for [projectId].
+     */
+    fun resolveScope(projectId: String, relativePath: String): PathScope {
+        val normalized = relativePath.replace('\\', '/').trimStart('/')
+        val prefix = ".pocketdev/imports/"
+        if (normalized.startsWith(prefix)) {
+            val rest = normalized.removePrefix(prefix)
+            val archiveName = rest.substringBefore('/')
+            if (archiveName.isNotBlank() && rest.contains('/')) {
+                return PathScope(
+                    label = "Work",
+                    archiveName = archiveName,
+                    scopeId = archiveScopeId(projectId, archiveName),
+                    scopeRoot = "$prefix$archiveName",
+                )
+            }
+        }
+        return PathScope(label = "Root", archiveName = null, scopeId = projectId, scopeRoot = "")
+    }
+
+    /** The most recently finalized version tag for [scopeId], or "v1.0" if none yet. */
+    fun currentVersionTag(scopeId: String): String = loadVersions(scopeId).lastOrNull()?.versionTag ?: "v1.0"
+
+    /** The tag a pending (in-progress, not yet finalized) turn will become for [scopeId]. */
+    fun pendingVersionTag(scopeId: String): String {
+        getPendingVersion(scopeId)?.let { return it.versionTag }
+        return "v1.${loadVersions(scopeId).size}"
+    }
 
     fun loadVersions(projectId: String): List<ProjectVersion> {
         val manifest = File(versionsDir(projectId), "versions.json")
