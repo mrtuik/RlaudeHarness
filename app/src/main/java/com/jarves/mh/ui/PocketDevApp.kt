@@ -7941,34 +7941,124 @@ private fun PipelineApproveCard(
     onReject: () -> Unit,
     onSubmitRejection: (String) -> Unit,
 ) {
-    var rejectionText by remember(plan, awaitingRejection) { mutableStateOf("") }
-    Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Plan ready — review before build", fontWeight = FontWeight.Bold, color = Color.Black)
-            plan.tasks.forEach { task ->
-                Column(Modifier.padding(vertical = 4.dp)) {
-                    Text("${task.subagent}: ${task.title}", color = Color.Black, fontWeight = FontWeight.SemiBold)
-                    task.files.forEach { file -> Text("  • $file", fontSize = 12.sp, color = Color.DarkGray) }
-                }
-            }
-            if (!awaitingRejection) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onReject, Modifier.weight(1f)) { Text("Cancel") }
-                    Button(onClick = onApprove, Modifier.weight(1f)) { Text("Approve") }
-                }
-            } else {
-                OutlinedTextField(
-                    value = rejectionText,
-                    onValueChange = { rejectionText = it },
-                    label = { Text("What was wrong with this plan?") },
-                    modifier = Modifier.fillMaxWidth(),
+    var showSheet by remember { mutableStateOf(false) }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable { showSheet = true },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(shape = RoundedCornerShape(6.dp), color = Color(0xFFEFEFEF)) {
+                Text(
+                    "Plan",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.Black,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                 )
-                Button(
-                    onClick = { onSubmitRejection(rejectionText) },
-                    modifier = Modifier.align(Alignment.End),
-                    enabled = rejectionText.isNotBlank(),
-                ) { Text("Submit") }
             }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "${plan.tasks.size} tasks ready — tap to review",
+                fontSize = 13.sp,
+                color = Color.DarkGray,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = { showSheet = true }, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Close, "Cancel", tint = Color.DarkGray, modifier = Modifier.size(18.dp))
+            }
+            IconButton(onClick = onApprove, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Check, "Approve", tint = Color(0xFF1B7F3A), modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+    if (showSheet) {
+        PipelinePlanBottomSheet(
+            plan = plan,
+            onDismiss = { showSheet = false },
+            onApprove = {
+                showSheet = false
+                onApprove()
+            },
+            onSubmitFeedback = { text ->
+                showSheet = false
+                onSubmitRejection(text)
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PipelinePlanBottomSheet(
+    plan: PipelinePlan,
+    onDismiss: () -> Unit,
+    onApprove: () -> Unit,
+    onSubmitFeedback: (String) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var feedback by remember { mutableStateOf("") }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color.White,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = Color.Black) },
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.9f)
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text("Plan", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+            if (plan.architectPlan.isNotBlank()) {
+                Text("Architecture", fontWeight = FontWeight.SemiBold, color = Color.Black)
+                Text(plan.architectPlan, fontSize = 13.sp, color = Color.DarkGray)
+            }
+            if (plan.analysis.isNotBlank()) {
+                Text("Analysis", fontWeight = FontWeight.SemiBold, color = Color.Black)
+                Text(plan.analysis, fontSize = 13.sp, color = Color.DarkGray)
+            }
+            Text("Changes (${plan.tasks.size})", fontWeight = FontWeight.SemiBold, color = Color.Black)
+            plan.tasks.forEach { task ->
+                Column(Modifier.padding(vertical = 2.dp)) {
+                    Text("${task.subagent}: ${task.title}", color = Color.Black, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                    if (task.description.isNotBlank()) {
+                        Text(task.description, fontSize = 12.sp, color = Color.DarkGray)
+                    }
+                    task.files.forEach { file -> Text("  • $file", fontSize = 12.sp, color = Color.Gray) }
+                }
+            }
+            OutlinedTextField(
+                value = feedback,
+                onValueChange = { feedback = it },
+                label = { Text("Comment — what should change?") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = { onSubmitFeedback(feedback) },
+                    enabled = feedback.isNotBlank(),
+                    modifier = Modifier.weight(1f),
+                ) { Text("Submit feedback") }
+                Button(onClick = onApprove, modifier = Modifier.weight(1f)) { Text("Approve") }
+            }
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
