@@ -5677,7 +5677,6 @@ private fun SquareZipIcon(
     }
 }
 
-@Composable
 /**
  * True for entries that belong on the "Root" sub-tab: the two standing agent-rules
  * files (CLAUDE.md/AGENTS.md, synced to the workspace root by AgentRulesManager) and
@@ -5691,6 +5690,7 @@ private fun isRootTabWorkspacePath(path: String): Boolean {
         normalized == "root-tab" || normalized.startsWith("root-tab/")
 }
 
+@Composable
 private fun FilesTab(
     files: List<WorkspaceEntry>,
     loading: Boolean,
