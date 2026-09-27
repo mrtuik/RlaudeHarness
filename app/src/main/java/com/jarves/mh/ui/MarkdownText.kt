@@ -87,7 +87,7 @@ fun MarkdownText(
                 is MarkdownBlock.Paragraph -> {
                     Text(
                         text = formatInlineMarkdown(block.text),
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 21.sp),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 23.sp),
                         color = color,
                     )
                 }
@@ -99,9 +99,9 @@ fun MarkdownText(
 @Composable
 private fun HeaderBlock(header: MarkdownBlock.Header) {
     val style = when (header.level) {
-        1 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 26.sp)
-        2 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 21.sp)
-        else -> MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+        1 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 27.sp)
+        2 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp)
+        else -> MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 19.sp)
     }
     Text(
         text = formatInlineMarkdown(header.text),
@@ -127,7 +127,7 @@ private fun BulletBlock(item: MarkdownBlock.BulletItem, color: Color) {
         )
         Text(
             text = formatInlineMarkdown(item.text),
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 21.sp),
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 23.sp),
             color = color,
             modifier = Modifier.weight(1f),
         )
@@ -142,12 +142,17 @@ private fun NumberedBlock(item: MarkdownBlock.NumberedItem, color: Color) {
     ) {
         Text(
             text = item.number,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 15.sp,
+                lineHeight = 23.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            ),
             modifier = Modifier.padding(end = 6.dp),
         )
         Text(
             text = formatInlineMarkdown(item.text),
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 21.sp),
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 23.sp),
             color = color,
             modifier = Modifier.weight(1f),
         )
@@ -174,6 +179,8 @@ private fun QuoteBlock(quote: MarkdownBlock.BlockQuote) {
         Text(
             text = formatInlineMarkdown(quote.text),
             style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 15.sp,
+                lineHeight = 23.sp,
                 fontStyle = FontStyle.Italic,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             ),
@@ -401,6 +408,63 @@ private fun formatInlineMarkdown(text: String): AnnotatedString {
             }
         }
     }
+}
+
+/**
+ * Strips markdown syntax down to plain, readable text — used when copying or sharing a
+ * message so the clipboard gets normal text instead of raw `**`, `#`, backticks, etc.
+ */
+fun stripMarkdownForCopy(markdown: String): String {
+    val lines = stripEmojis(markdown).lines()
+    val out = StringBuilder()
+
+    for (rawLine in lines) {
+        var line = rawLine
+
+        // Code fences: drop the ``` marker line entirely, keep the code content as-is.
+        val trimmedStart = line.trimStart()
+        if (trimmedStart.startsWith("```")) {
+            continue
+        }
+
+        val trimmed = line.trim()
+
+        // Horizontal rule
+        if (trimmed == "---" || trimmed == "***" || trimmed == "___") {
+            out.append('\n')
+            continue
+        }
+
+        // Headings
+        if (trimmed.startsWith("#")) {
+            line = trimmed.dropWhile { it == '#' }.trim()
+        }
+
+        // Blockquote marker
+        if (line.trim().startsWith(">")) {
+            line = line.trim().removePrefix(">").trim()
+        }
+
+        // Bullet markers (-, *, +) at line start — keep a plain dash for readability
+        val bulletMatch = Regex("^(\\s*)([-*+])\\s+(.*)").find(line)
+        if (bulletMatch != null) {
+            line = "${bulletMatch.groupValues[1]}- ${bulletMatch.groupValues[3]}"
+        }
+
+        // Inline formatting
+        line = line
+            .replace(Regex("\\*\\*\\*(.+?)\\*\\*\\*"), "$1")
+            .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
+            .replace(Regex("__(.+?)__"), "$1")
+            .replace(Regex("(?<![*\\w])\\*(?!\\s)(.+?)(?<!\\s)\\*(?!\\*)"), "$1")
+            .replace(Regex("~~(.+?)~~"), "$1")
+            .replace(Regex("`([^`]+)`"), "$1")
+            .replace(Regex("\\[([^\\]]+)]\\(([^)]+)\\)"), "$1 ($2)")
+
+        out.append(line).append('\n')
+    }
+
+    return out.toString().trim()
 }
 
 private fun parseMarkdown(raw: String): List<MarkdownBlock> {
