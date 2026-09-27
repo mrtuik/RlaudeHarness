@@ -4505,6 +4505,7 @@ private fun WorkspaceScreen(
                 fileToExport = entry
                 exportFileLauncher.launch(entry.name)
             },
+            onRenameZip = { newName -> activeZipScreen = newName },
         )
         return
     }
@@ -5031,6 +5032,7 @@ private fun ZipContentsScreen(
     onExport: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
     onDownloadFile: (WorkspaceEntry) -> Unit,
+    onRenameZip: ((String) -> Unit)? = null,
 ) {
     BackHandler(onBack = onBack)
 
@@ -5044,10 +5046,13 @@ private fun ZipContentsScreen(
             .groupingBy { it.path.substringBeforeLast('/') }
             .eachCount()
     }
+    var zipMenuOpen by remember { mutableStateOf(false) }
+    var showRenameZipDialog by remember { mutableStateOf(false) }
+    var renameZipText by remember(zipName) { mutableStateOf(zipName) }
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = {
                     Text(
                         text = zipName,
@@ -5068,16 +5073,57 @@ private fun ZipContentsScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onExport) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_custom_download),
-                            contentDescription = "Download zip",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurface,
-                        )
+                    Box {
+                        IconButton(onClick = { zipMenuOpen = true }) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Zip options",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = zipMenuOpen,
+                            onDismissRequest = { zipMenuOpen = false },
+                            containerColor = Color.White,
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            if (onRenameZip != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Rename") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = ImageVector.vectorResource(R.drawable.ic_write),
+                                            contentDescription = null,
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    },
+                                    onClick = {
+                                        zipMenuOpen = false
+                                        renameZipText = zipName
+                                        showRenameZipDialog = true
+                                    },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Download") },
+                                leadingIcon = {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_custom_download),
+                                        contentDescription = null,
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                },
+                                onClick = {
+                                    zipMenuOpen = false
+                                    onExport()
+                                },
+                            )
+                        }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                 ),
             )
@@ -5219,6 +5265,36 @@ private fun ZipContentsScreen(
                 }
             }
         }
+    }
+
+    if (showRenameZipDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameZipDialog = false },
+            title = { Text("Rename") },
+            text = {
+                OutlinedTextField(
+                    renameZipText,
+                    { renameZipText = it },
+                    label = { Text("Zip name") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(4.dp),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRenameZip?.invoke(renameZipText)
+                        showRenameZipDialog = false
+                    },
+                    enabled = renameZipText.isNotBlank(),
+                    shape = RoundedCornerShape(4.dp),
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameZipDialog = false }, shape = RoundedCornerShape(4.dp)) { Text("Cancel") }
+            },
+            shape = RoundedCornerShape(4.dp),
+        )
     }
 }
 
