@@ -126,6 +126,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Android
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.Checklist
@@ -191,6 +192,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -2537,7 +2539,7 @@ private fun LogsScreen(onBack: () -> Unit) {
     Scaffold(
         containerColor = Color.White,
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = { Text("Logs", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -2545,14 +2547,18 @@ private fun LogsScreen(onBack: () -> Unit) {
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        clipboard.setText(AnnotatedString(content))
-                        Toast.makeText(context, "Crash log copied", Toast.LENGTH_SHORT).show()
-                    }) {
+                    IconButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(content))
+                            Toast.makeText(context, "Crash log copied", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(44.dp),
+                    ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_custom_copy),
                             contentDescription = "Copy log",
                             tint = Color.Black,
+                            modifier = Modifier.size(24.dp),
                         )
                     }
                 },
@@ -4547,7 +4553,7 @@ private fun WorkspaceScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = Color.White,
         topBar = {
-            if (selectedTab != WorkspaceTab.CHAT) TopAppBar(
+            if (selectedTab != WorkspaceTab.CHAT) CenterAlignedTopAppBar(
                 title = { Text(selectedTab.label, fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = { selectedTab = WorkspaceTab.CHAT }) {
@@ -4555,7 +4561,8 @@ private fun WorkspaceScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
-            ) else TopAppBar(
+            ) else CenterAlignedTopAppBar(
+                modifier = Modifier.height(64.dp),
                 title = {
                     Text(
                         state.activeProject?.name.orEmpty(),
@@ -4830,11 +4837,11 @@ private fun FileViewerScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = {
-                    Column {
-                        Text(fileName, fontWeight = FontWeight.SemiBold)
-                        Text(filePath, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(fileName, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(filePath, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 },
                 navigationIcon = {
@@ -6042,15 +6049,15 @@ private fun ChatTab(
                             Surface(
                                 onClick = { planMenuOpen = true },
                                 modifier = Modifier.height(36.dp),
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(18.dp),
                                 color = Color.White,
-                                shadowElevation = 3.dp,
+                                shadowElevation = 1.dp,
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxHeight()
-                                        .padding(horizontal = 14.dp),
+                                        .padding(start = 14.dp, end = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(
@@ -6059,6 +6066,12 @@ private fun ChatTab(
                                         fontWeight = FontWeight.Medium,
                                         color = Color.Black,
                                     )
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDropDown,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = Color.Black,
+                                    )
                                 }
                             }
                             DropdownMenu(
@@ -6066,9 +6079,9 @@ private fun ChatTab(
                                 onDismissRequest = { planMenuOpen = false },
                                 containerColor = Color.White,
                                 shape = RoundedCornerShape(12.dp),
-                                tonalElevation = 3.dp,
-                                shadowElevation = 3.dp,
-                                offset = DpOffset(x = 0.dp, y = (-108).dp),
+                                tonalElevation = 1.dp,
+                                shadowElevation = 1.dp,
+                                offset = DpOffset(x = 0.dp, y = 4.dp),
                                 properties = PopupProperties(focusable = false),
                             ) {
                                 DropdownMenuItem(
@@ -6080,6 +6093,7 @@ private fun ChatTab(
                                         onTogglePlanMode(false)
                                     },
                                 )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
                                 DropdownMenuItem(
                                     text = { Text("Plan") },
                                     leadingIcon = { Icon(Icons.Outlined.Checklist, null, tint = Color.Black) },
@@ -6280,6 +6294,23 @@ private fun RunningRabbitIndicator(
     }
 }
 
+/**
+ * Chat-reported change paths sometimes come back in the guest sandbox's
+ * absolute form (e.g. "/workspace/my-project/js/index.js") rather than a
+ * path relative to the on-device project root. `File(root, path)` silently
+ * ignores `root` whenever `path` looks absolute, so any such prefix must be
+ * stripped before the path is joined to a root — otherwise resolution always
+ * misses and callers see a permanently-empty result with no error.
+ */
+private fun normalizeAttachmentPath(path: String): String {
+    val trimmed = path.trim()
+    val guestWorkspacePrefix = Regex("^/workspace/[^/]+/")
+    return when {
+        guestWorkspacePrefix.containsMatchIn(trimmed) -> trimmed.replaceFirst(guestWorkspacePrefix, "")
+        else -> trimmed.trimStart('/')
+    }
+}
+
 private fun readAttachmentText(root: java.io.File?, attachment: ChatAttachment, context: Context? = null): String? {
     return runCatching {
         val file = resolveWorkspaceFile(root, attachment.relativePath, context)
@@ -6292,15 +6323,18 @@ private fun readAttachmentText(root: java.io.File?, attachment: ChatAttachment, 
  * callers (download / share) can hand it to FileProvider or copy its bytes.
  */
 private fun resolveWorkspaceFile(root: java.io.File?, relativePath: String, context: Context? = null): java.io.File? {
+    val normalized = normalizeAttachmentPath(relativePath)
     val candidates = mutableListOf<java.io.File>()
     if (root != null) {
-        candidates.add(java.io.File(root, relativePath))
-        root.parentFile?.let { candidates.add(java.io.File(it, relativePath)) }
+        candidates.add(java.io.File(root, normalized))
+        root.parentFile?.let { candidates.add(java.io.File(it, normalized)) }
     }
     if (context != null) {
-        candidates.add(java.io.File(context.filesDir, "workspaces/$relativePath"))
-        candidates.add(java.io.File(context.filesDir, relativePath))
+        candidates.add(java.io.File(context.filesDir, "workspaces/$normalized"))
+        candidates.add(java.io.File(context.filesDir, normalized))
     }
+    // Last resort: the raw, un-normalized path, in case it really was a
+    // valid absolute path on-device (e.g. an external-storage attachment).
     candidates.add(java.io.File(relativePath))
     return candidates.firstOrNull { it.isFile && it.canRead() }
 }
@@ -6342,10 +6376,13 @@ private fun TextAttachmentBottomSheet(
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameDraft by remember(showRenameDialog) { mutableStateOf(currentDisplayName) }
 
+    var isContentLoading by remember(attachment.id, attachment.relativePath, root) { mutableStateOf(true) }
     val content by produceState<String?>(initialValue = null, attachment.relativePath, root) {
+        isContentLoading = true
         value = withContext(Dispatchers.IO) {
             readAttachmentText(root, attachment, context)
         }
+        isContentLoading = false
     }
 
     LaunchedEffect(attachment.id) {
@@ -6425,6 +6462,8 @@ private fun TextAttachmentBottomSheet(
                         if (!text.isNullOrBlank()) {
                             clipboard.setText(AnnotatedString(text))
                             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Couldn't read $currentDisplayName", Toast.LENGTH_SHORT).show()
                         }
                     },
                     onDownload = { downloadLauncher.launch(currentDisplayName) },
@@ -6441,7 +6480,7 @@ private fun TextAttachmentBottomSheet(
 
             Spacer(Modifier.height(4.dp))
 
-            if (content == null) {
+            if (isContentLoading) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -6449,6 +6488,29 @@ private fun TextAttachmentBottomSheet(
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = Color.Black)
+                }
+            } else if (content == null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Description,
+                            contentDescription = null,
+                            modifier = Modifier.size(32.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Couldn't read $currentDisplayName",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             } else {
                 val isMarkdownFile = currentDisplayName.substringAfterLast('.', "").lowercase() == "md"
@@ -6598,13 +6660,14 @@ private fun ImageAttachmentBottomSheet(
         coroutineScope.launch(Dispatchers.IO) {
             runCatching {
                 val candidates = mutableListOf<java.io.File>()
+                val normalized = normalizeAttachmentPath(attachment.relativePath)
                 if (root != null) {
-                    candidates.add(java.io.File(root, attachment.relativePath))
-                    root.parentFile?.let { candidates.add(java.io.File(it, attachment.relativePath)) }
+                    candidates.add(java.io.File(root, normalized))
+                    root.parentFile?.let { candidates.add(java.io.File(it, normalized)) }
                 }
                 if (context != null) {
-                    candidates.add(java.io.File(context.filesDir, "workspaces/${attachment.relativePath}"))
-                    candidates.add(java.io.File(context.filesDir, attachment.relativePath))
+                    candidates.add(java.io.File(context.filesDir, "workspaces/$normalized"))
+                    candidates.add(java.io.File(context.filesDir, normalized))
                 }
                 candidates.add(java.io.File(attachment.relativePath))
                 val file = candidates.firstOrNull { it.isFile && it.canWrite() } ?: candidates.firstOrNull { it.isFile }
@@ -7158,7 +7221,7 @@ private fun TurnCompletionSummaryCard(
             .fillMaxWidth()
             .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
             .clickable { showTreeSheet = true },
-        shape = RoundedCornerShape(2.dp),
+        shape = RoundedCornerShape(0.dp),
         color = Color.White,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
@@ -7847,14 +7910,15 @@ private fun isImageAttachment(attachment: ChatAttachment): Boolean {
 
 private fun decodeAttachmentBitmap(root: java.io.File?, attachment: ChatAttachment, context: Context? = null, targetDim: Int = 2048): ImageBitmap? {
     return runCatching {
+        val normalized = normalizeAttachmentPath(attachment.relativePath)
         val candidates = mutableListOf<java.io.File>()
         if (root != null) {
-            candidates.add(java.io.File(root, attachment.relativePath))
-            root.parentFile?.let { candidates.add(java.io.File(it, attachment.relativePath)) }
+            candidates.add(java.io.File(root, normalized))
+            root.parentFile?.let { candidates.add(java.io.File(it, normalized)) }
         }
         if (context != null) {
-            candidates.add(java.io.File(context.filesDir, "workspaces/${attachment.relativePath}"))
-            candidates.add(java.io.File(context.filesDir, attachment.relativePath))
+            candidates.add(java.io.File(context.filesDir, "workspaces/$normalized"))
+            candidates.add(java.io.File(context.filesDir, normalized))
         }
         candidates.add(java.io.File(attachment.relativePath))
 
