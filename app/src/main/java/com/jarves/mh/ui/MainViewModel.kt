@@ -3242,15 +3242,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun isClaudeRuntimeMetadata(relativePath: String): Boolean {
         return relativePath == ".claude" ||
             relativePath == ".claude.json" ||
-            relativePath.startsWith(".claude/") ||
-            // Chat attachments (uploaded photos/files) live under attachments/<chatId>/
-            // inside the workspace root but should never show up in the Files tab.
-            relativePath == "attachments" ||
-            relativePath.startsWith("attachments/") ||
-            // Agent instruction files written for the CLI runtimes themselves — not
-            // user project content, so keep them out of the workspace file tree/exports.
-            relativePath == "AGENTS.md" ||
-            relativePath == "CLAUDE.md"
+            relativePath.startsWith(".claude/")
     }
 
     private fun isExportExcludedPath(relativePath: String): Boolean {
@@ -3318,13 +3310,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val trimmed = newName.trim()
         if (trimmed.isBlank()) return
         val current = _state.value
+        val project = current.activeProject ?: return
+        val root = projectWorkspaceRoot(project)
+
+        val targetAttachment = current.pendingAttachments.firstOrNull { it.id == attachmentId }
+            ?: current.messages.flatMap { it.attachments }.firstOrNull { it.id == attachmentId }
+
+        var newRelativePath: String? = null
+        if (targetAttachment != null) {
+            val oldFile = File(root, targetAttachment.relativePath)
+            if (oldFile.exists()) {
+                val oldExt = targetAttachment.displayName.substringAfterLast('.', "")
+                val finalName = if (!trimmed.contains('.') && oldExt.isNotBlank()) "$trimmed.$oldExt" else trimmed
+                val newFile = File(oldFile.parentFile, sanitizeAttachmentName(finalName))
+                if (oldFile.canonicalPath != newFile.canonicalPath) {
+                    if (newFile.exists()) newFile.delete()
+                    oldFile.renameTo(newFile)
+                }
+                newRelativePath = newFile.relativeTo(root).invariantSeparatorsPath
+            }
+        }
+
         val updatedPending = current.pendingAttachments.map {
-            if (it.id == attachmentId) it.copy(displayName = trimmed) else it
+            if (it.id == attachmentId) {
+                it.copy(
+                    displayName = trimmed,
+                    relativePath = newRelativePath ?: it.relativePath,
+                )
+            } else it
         }
         val updatedMessages = current.messages.map { msg ->
             if (msg.attachments.any { it.id == attachmentId }) {
                 msg.copy(attachments = msg.attachments.map {
-                    if (it.id == attachmentId) it.copy(displayName = trimmed) else it
+                    if (it.id == attachmentId) {
+                        it.copy(
+                            displayName = trimmed,
+                            relativePath = newRelativePath ?: it.relativePath,
+                        )
+                    } else it
                 })
             } else msg
         }
@@ -3332,6 +3355,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 pendingAttachments = updatedPending,
                 messages = updatedMessages,
+                openedFilePath = if (targetAttachment != null && it.openedFilePath == targetAttachment.relativePath) {
+                    newRelativePath ?: it.openedFilePath
+                } else it.openedFilePath,
             )
         }
         current.activeProject?.let { p ->
@@ -3340,6 +3366,55 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         persistMessages()
+        refreshProjectFiles()
+    }
+
+    fun renameWorkspaceFile(oldPath: String, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isBlank()) return
+        val project = _state.value.activeProject ?: return
+        val root = projectWorkspaceRoot(project)
+        val oldFile = File(root, oldPath)
+        if (!oldFile.exists()) return
+
+        val oldExt = oldFile.name.substringAfterLast('.', "")
+        val finalName = if (!trimmed.contains('.') && oldExt.isNotBlank()) "$trimmed.$oldExt" else trimmed
+        val newFile = File(oldFile.parentFile, finalName)
+        if (oldFile.canonicalPath != newFile.canonicalPath) {
+            if (newFile.exists()) newFile.delete()
+            oldFile.renameTo(newFile)
+        }
+        val newRelativePath = newFile.relativeTo(root).invariantSeparatorsPath
+
+        val current = _state.value
+        val updatedPending = current.pendingAttachments.map {
+            if (it.relativePath == oldPath || it.displayName == oldFile.name) {
+                it.copy(displayName = finalName, relativePath = newRelativePath)
+            } else it
+        }
+        val updatedMessages = current.messages.map { msg ->
+            if (msg.attachments.any { it.relativePath == oldPath || it.displayName == oldFile.name }) {
+                msg.copy(attachments = msg.attachments.map {
+                    if (it.relativePath == oldPath || it.displayName == oldFile.name) {
+                        it.copy(displayName = finalName, relativePath = newRelativePath)
+                    } else it
+                })
+            } else msg
+        }
+        _state.update {
+            it.copy(
+                pendingAttachments = updatedPending,
+                messages = updatedMessages,
+                openedFilePath = if (it.openedFilePath == oldPath) newRelativePath else it.openedFilePath,
+            )
+        }
+        current.activeProject?.let { p ->
+            current.activeChatId?.let { c ->
+                preferences.saveDraft(p.id, c, current.draftPrompt, updatedPending)
+            }
+        }
+        persistMessages()
+        refreshProjectFiles()
     }
 
     fun restoreMessageForEdit(message: ChatMessage) {
