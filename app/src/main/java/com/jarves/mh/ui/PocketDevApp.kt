@@ -6149,7 +6149,7 @@ private fun ChatTab(
                                     promptValue = inputVal
                                 }
                             } else {
-                                val isVeryLong = input.length >= 800 || (input.length >= 350 && input.count { it == '\n' } >= 8)
+                                val isVeryLong = input.length > 15_000
                                 if (isVeryLong && pendingAttachments.size < MainViewModel.MAX_ATTACHMENTS_PER_MESSAGE) {
                                     val chunk = if (prompt.isNotBlank() && input.startsWith(prompt)) {
                                         input.substring(prompt.length).trim()
@@ -6158,7 +6158,7 @@ private fun ChatTab(
                                     } else {
                                         input.trim()
                                     }
-                                    if (chunk.length >= 500 || (chunk.length >= 250 && chunk.count { it == '\n' } >= 6)) {
+                                    if (chunk.length > 15_000) {
                                         onAddTextAttachment(chunk)
                                         promptValue = if (prompt.isNotBlank() && (input.startsWith(prompt) || input.endsWith(prompt))) promptValue else TextFieldValue("")
                                         Toast.makeText(context, "Converted long text to attachment", Toast.LENGTH_SHORT).show()
@@ -6187,7 +6187,7 @@ private fun ChatTab(
                                 } else if (transferable.hasMediaType(MediaType.Text)) {
                                     val clipData = transferable.clipEntry.clipData
                                     val text = (0 until clipData.itemCount).mapNotNull { clipData.getItemAt(it).text?.toString() }.joinToString("\n")
-                                    if ((text.length >= 800 || (text.length >= 350 && text.count { it == '\n' } >= 8)) && pendingAttachments.size < MainViewModel.MAX_ATTACHMENTS_PER_MESSAGE) {
+                                    if (text.length > 15_000 && pendingAttachments.size < MainViewModel.MAX_ATTACHMENTS_PER_MESSAGE) {
                                         onAddTextAttachment(text)
                                         Toast.makeText(context, "Converted long text to attachment", Toast.LENGTH_SHORT).show()
                                         transferable.consume { true }
