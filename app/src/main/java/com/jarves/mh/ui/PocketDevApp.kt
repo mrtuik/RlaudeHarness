@@ -4563,12 +4563,12 @@ private fun WorkspaceScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
             ) else CenterAlignedTopAppBar(
-                modifier = Modifier.height(64.dp),
+                modifier = Modifier.height(76.dp),
                 title = {
                     Text(
                         state.activeProject?.name.orEmpty(),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.combinedClickable(
@@ -4606,7 +4606,7 @@ private fun WorkspaceScreen(
                         Icon(
                             painter = painterResource(R.drawable.ic_custom_history),
                             contentDescription = "Project chats",
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(26.dp),
                             tint = Color.Black,
                         )
                     }
@@ -6155,8 +6155,9 @@ private fun ChatTab(
                                 onDismissRequest = { planMenuOpen = false },
                                 containerColor = Color.White,
                                 shape = RoundedCornerShape(12.dp),
-                                tonalElevation = 1.dp,
+                                tonalElevation = 0.dp,
                                 shadowElevation = 1.dp,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                 offset = DpOffset(x = 0.dp, y = 4.dp),
                                 properties = PopupProperties(focusable = false),
                             ) {
@@ -7640,7 +7641,7 @@ private data class ZipDirectoryGroup(val directoryPath: String, val fileNames: L
 
 private fun groupChangedPathsByDirectory(paths: List<String>): List<ZipDirectoryGroup> {
     return paths
-        .map { it.trim().trimStart('/') }
+        .map { normalizeAttachmentPath(it) }
         .filter { it.isNotBlank() }
         .distinct()
         .groupBy { it.substringBeforeLast('/', missingDelimiterValue = "") }
