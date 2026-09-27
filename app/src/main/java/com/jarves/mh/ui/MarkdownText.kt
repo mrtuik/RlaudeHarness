@@ -87,7 +87,11 @@ fun MarkdownText(
                 is MarkdownBlock.Paragraph -> {
                     Text(
                         text = formatInlineMarkdown(block.text),
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 23.sp),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 15.sp,
+                            lineHeight = 23.sp,
+                            fontFamily = com.jarves.mh.ui.theme.ChatFontFamily,
+                        ),
                         color = color,
                     )
                 }
@@ -99,9 +103,9 @@ fun MarkdownText(
 @Composable
 private fun HeaderBlock(header: MarkdownBlock.Header) {
     val style = when (header.level) {
-        1 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 27.sp)
-        2 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp)
-        else -> MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 19.sp)
+        1 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 27.sp, fontFamily = com.jarves.mh.ui.theme.ChatFontFamily)
+        2 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp, fontFamily = com.jarves.mh.ui.theme.ChatFontFamily)
+        else -> MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 19.sp, fontFamily = com.jarves.mh.ui.theme.ChatFontFamily)
     }
     Text(
         text = formatInlineMarkdown(header.text),
@@ -127,7 +131,11 @@ private fun BulletBlock(item: MarkdownBlock.BulletItem, color: Color) {
         )
         Text(
             text = formatInlineMarkdown(item.text),
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 23.sp),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 15.sp,
+                lineHeight = 23.sp,
+                fontFamily = com.jarves.mh.ui.theme.ChatFontFamily,
+            ),
             color = color,
             modifier = Modifier.weight(1f),
         )
@@ -146,13 +154,18 @@ private fun NumberedBlock(item: MarkdownBlock.NumberedItem, color: Color) {
                 fontSize = 15.sp,
                 lineHeight = 23.sp,
                 fontWeight = FontWeight.Bold,
+                fontFamily = com.jarves.mh.ui.theme.ChatFontFamily,
                 color = MaterialTheme.colorScheme.primary,
             ),
             modifier = Modifier.padding(end = 6.dp),
         )
         Text(
             text = formatInlineMarkdown(item.text),
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 23.sp),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 15.sp,
+                lineHeight = 23.sp,
+                fontFamily = com.jarves.mh.ui.theme.ChatFontFamily,
+            ),
             color = color,
             modifier = Modifier.weight(1f),
         )
@@ -182,6 +195,7 @@ private fun QuoteBlock(quote: MarkdownBlock.BlockQuote) {
                 fontSize = 15.sp,
                 lineHeight = 23.sp,
                 fontStyle = FontStyle.Italic,
+                fontFamily = com.jarves.mh.ui.theme.ChatFontFamily,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             ),
         )
