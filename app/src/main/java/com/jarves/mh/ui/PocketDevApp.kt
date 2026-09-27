@@ -208,6 +208,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -6377,11 +6378,16 @@ private fun ChatTab(
                                 }
                             }
                             if (turnChangedPaths.isNotEmpty()) {
-                                TurnCompletionSummaryCard(
-                                    changedPaths = turnChangedPaths,
-                                    projectSlug = projectSlug,
-                                    onOpenChangedFile = onOpenChangedFile,
-                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    turnChangedPaths.forEach { path ->
+                                        key(path) {
+                                            PerFileChangeCard(
+                                                relativePath = path,
+                                                onOpen = { onOpenChangedFile(path) },
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -8160,149 +8166,87 @@ private fun WorkBlockCard(
     }
 }
 
+/**
+ * A single changed file rendered inline in the chat stream, right where the turn that
+ * produced it ends. Replaces the old end-of-turn "Changed files (N)" bottom sheet
+ * (formerly TurnCompletionSummaryCard -> ChangedFilesSheet): each file gets its own
+ * compact card instead of being batched into one aggregate summary.
+ */
 @Composable
-private fun TurnCompletionSummaryCard(
-    changedPaths: List<String>,
-    projectSlug: String = "project",
-    onOpenChangedFile: (String) -> Unit = {},
+private fun PerFileChangeCard(
+    relativePath: String,
+    onOpen: () -> Unit,
 ) {
-    var showTreeSheet by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    val root = LocalAttachmentRoot.current
+    val fileName = relativePath.substringAfterLast('/')
+    val ext = fileName.substringAfterLast('.', "")
+    val isImage = ext.lowercase() in setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "ico")
+    val typeLabel = when {
+        ext.isBlank() -> if (isImage) "Image" else "Code"
+        isImage -> "Image · ${ext.uppercase()}"
+        else -> "Code · ${ext.uppercase()}"
+    }
 
-    Surface(
+    val downloadLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("*/*"),
+        onResult = { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            val file = resolveWorkspaceFile(root, relativePath, context)
+            val ok = file != null && copyFileToUri(context, file, uri)
+            Toast.makeText(
+                context,
+                if (ok) "Saved $fileName" else "Couldn't read $fileName",
+                Toast.LENGTH_SHORT,
+            ).show()
+        },
+    )
+
+    val cardShape = RoundedCornerShape(12.dp)
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
-            .clickable { showTreeSheet = true },
-        shape = RoundedCornerShape(0.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            .padding(start = 4.dp, end = 4.dp, top = 3.dp, bottom = 3.dp)
+            .clip(cardShape)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, cardShape)
+            .background(Color.White)
+            .clickable { onOpen() }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .size(34.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFFF3EFE8)),
+            contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_custom_file),
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = Color.Black,
+            // Binary files (images, etc.) fall back to the same generic-icon treatment
+            // FileTypeIcon already applies for those extensions — no diff preview needed,
+            // just a distinct icon in the same card shape as text files.
+            FileTypeIcon(name = fileName, isDirectory = false, modifier = Modifier.size(17.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = fileName,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = "Changed files",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Black,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = "${changedPaths.size} changed file" + if (changedPaths.size > 1) "s" else "",
-                    fontSize = 11.sp,
-                    color = Color.Black,
-                )
-            }
+            Text(
+                text = typeLabel,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-    }
-
-    if (showTreeSheet) {
-        ChangedFilesSheet(
-            changedPaths = changedPaths,
-            onDismiss = { showTreeSheet = false },
-            onOpenChangedFile = { path ->
-                showTreeSheet = false
-                onOpenChangedFile(path)
-            },
+        FileActionsMenu(
+            onCopy = null,
+            onDownload = { downloadLauncher.launch(fileName) },
+            onShare = null,
         )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ChangedFilesSheet(
-    changedPaths: List<String>,
-    onDismiss: () -> Unit,
-    onOpenChangedFile: (String) -> Unit = {},
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val groupedByDir = remember(changedPaths) { groupChangedPathsByDirectory(changedPaths) }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = Color.White,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = Color.Black) },
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_custom_file),
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = Color.Black,
-                )
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "Changed files",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = Color.Black,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = "${changedPaths.size} changed file" + if (changedPaths.size > 1) "s" else "",
-                        fontSize = 12.sp,
-                        color = Color.Black,
-                    )
-                }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
-            Spacer(Modifier.height(12.dp))
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                groupedByDir.forEach { group ->
-                    item(key = "dir:${group.directoryPath}") {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = group.directoryPath.ifEmpty { "." },
-                                modifier = Modifier.fillMaxWidth(),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            group.fileNames.forEach { fileName ->
-                                val fullPath = if (group.directoryPath.isEmpty()) fileName else "${group.directoryPath}/$fileName"
-                                val ext = fileName.substringAfterLast('.', "").uppercase()
-                                ChangedFileCard(
-                                    fileName = fileName,
-                                    relativePath = fullPath,
-                                    extensionLabel = ext,
-                                    onOpen = { onOpenChangedFile(fullPath) },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -8428,122 +8372,6 @@ private fun FileActionsMenu(
  * code view.
  */
 @Composable
-private fun ChangedFileCard(
-    fileName: String,
-    relativePath: String,
-    extensionLabel: String,
-    onOpen: () -> Unit,
-) {
-    val context = LocalContext.current
-    val root = LocalAttachmentRoot.current
-    val clipboard = LocalClipboardManager.current
-    val scope = rememberCoroutineScope()
-
-    val downloadLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("*/*"),
-        onResult = { uri ->
-            if (uri == null) return@rememberLauncherForActivityResult
-            val file = resolveWorkspaceFile(root, relativePath, context)
-            val ok = file != null && copyFileToUri(context, file, uri)
-            Toast.makeText(
-                context,
-                if (ok) "Saved $fileName" else "Couldn't read $fileName",
-                Toast.LENGTH_SHORT,
-            ).show()
-        },
-    )
-
-    val onCopy: () -> Unit = {
-        scope.launch {
-            val text = withContext(Dispatchers.IO) {
-                resolveWorkspaceFile(root, relativePath, context)?.readText(Charsets.UTF_8)
-            }
-            if (text != null) {
-                clipboard.setText(AnnotatedString(text))
-                Toast.makeText(context, "Copied $fileName", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(context, "Couldn't read $fileName", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-    val onDownload: () -> Unit = { downloadLauncher.launch(fileName) }
-    val onShare: () -> Unit = {
-        scope.launch {
-            val file = withContext(Dispatchers.IO) { resolveWorkspaceFile(root, relativePath, context) }
-            if (file != null) {
-                context.startActivity(Intent.createChooser(shareFileIntent(context, file), "Share $fileName"))
-            } else {
-                Toast.makeText(context, "Couldn't read $fileName", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    val cardShape = RoundedCornerShape(12.dp)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(cardShape)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, cardShape)
-            .background(Color.White)
-            .clickable { onOpen() }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(RoundedCornerShape(9.dp))
-                .background(Color(0xFFF3EFE8)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                painterResource(if (fileName.endsWith(".zip", ignoreCase = true)) R.drawable.ic_custom_zip else R.drawable.ic_custom_file),
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = Color.Black,
-            )
-        }
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = fileName.substringBeforeLast('.', fileName),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color.Black,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = if (extensionLabel.isNotEmpty()) "Code · $extensionLabel" else "Code",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        FileActionsMenu(
-            onCopy = onCopy,
-            onDownload = onDownload,
-            onShare = onShare,
-        )
-    }
-}
-
-private data class ZipDirectoryGroup(val directoryPath: String, val fileNames: List<String>)
-
-private fun groupChangedPathsByDirectory(paths: List<String>): List<ZipDirectoryGroup> {
-    return paths
-        .map { normalizeAttachmentPath(it) }
-        .filter { it.isNotBlank() }
-        .distinct()
-        .groupBy { it.substringBeforeLast('/', missingDelimiterValue = "") }
-        .map { (dir, fullPaths) ->
-            ZipDirectoryGroup(
-                directoryPath = dir,
-                fileNames = fullPaths.map { it.substringAfterLast('/') }.distinct().sorted(),
-            )
-        }
-        .sortedBy { it.directoryPath }
-}
-
 @Composable
 private fun ClaudeActivityDisclosure(
     items: List<ActivityItem>,
@@ -8780,6 +8608,21 @@ private fun activityIcon(item: ActivityItem?): ImageVector {
 
 @Composable
 private fun ActivityExpandedDetail(item: ActivityItem?, detail: String) {
+    if (item?.readVersionTag != null) {
+        val scopeSuffix = if (item.contextLabel == "Work" && !item.archiveName.isNullOrBlank()) {
+            " · ${item.archiveName}"
+        } else {
+            ""
+        }
+        Text(
+            text = "🗂 ${item.contextLabel ?: "Root"}$scopeSuffix · read ${item.readVersionTag} → write ${item.writeVersionTag}",
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 25.dp, end = 8.dp, bottom = 4.dp),
+            fontSize = 10.5.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
     if (item?.isCommand == true) {
         Text(
             detail,
