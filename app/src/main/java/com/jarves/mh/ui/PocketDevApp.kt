@@ -6039,26 +6039,35 @@ private fun ChatTab(
                         Spacer(Modifier.weight(1f))
 
                         Box {
-                            Row(
-                                modifier = Modifier
-                                    .height(36.dp)
-                                    .clip(RoundedCornerShape(1.dp))
-                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(1.dp))
-                                    .clickable { planMenuOpen = true }
-                                    .padding(horizontal = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                            Surface(
+                                onClick = { planMenuOpen = true },
+                                modifier = Modifier.height(36.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color.White,
+                                shadowElevation = 3.dp,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                             ) {
-                                Text(
-                                    text = if (planModeEnabled) "Plan" else "Build",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color.Black,
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .padding(horizontal = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = if (planModeEnabled) "Plan" else "Build",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color.Black,
+                                    )
+                                }
                             }
                             DropdownMenu(
                                 expanded = planMenuOpen,
                                 onDismissRequest = { planMenuOpen = false },
                                 containerColor = Color.White,
+                                shape = RoundedCornerShape(12.dp),
+                                tonalElevation = 3.dp,
+                                shadowElevation = 3.dp,
                                 offset = DpOffset(x = 0.dp, y = (-108).dp),
                                 properties = PopupProperties(focusable = false),
                             ) {
@@ -6083,7 +6092,7 @@ private fun ChatTab(
                             }
                         }
 
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(14.dp))
 
                         if (isRunning) {
                             Box(
