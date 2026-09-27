@@ -4572,7 +4572,7 @@ private fun WorkspaceScreen(
     }
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        containerColor = Color.White,
+        containerColor = com.jarves.mh.ui.theme.PocketWorkspaceCanvas,
         topBar = {
             if (selectedTab != WorkspaceTab.CHAT) CenterAlignedTopAppBar(
                 modifier = Modifier.padding(top = 8.dp),
@@ -4582,7 +4582,7 @@ private fun WorkspaceScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to chat")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = com.jarves.mh.ui.theme.PocketWorkspaceCanvas),
             ) else CenterAlignedTopAppBar(
                 modifier = Modifier.padding(top = 8.dp),
                 title = {
@@ -4633,7 +4633,7 @@ private fun WorkspaceScreen(
                     }
                     if (state.isRunning) CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = com.jarves.mh.ui.theme.PocketWorkspaceCanvas),
             )
         },
         bottomBar = {
