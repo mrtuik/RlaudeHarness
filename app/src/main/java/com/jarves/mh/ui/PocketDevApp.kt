@@ -8372,7 +8372,6 @@ private fun FileActionsMenu(
  * code view.
  */
 @Composable
-@Composable
 private fun ClaudeActivityDisclosure(
     items: List<ActivityItem>,
     headline: String,
