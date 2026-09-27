@@ -5659,6 +5659,25 @@ private fun FilesTab(
     val zipVersionLabel = latestVersionTag.lowercase()
     var activeSubTab by rememberSaveable { mutableStateOf("Imported") }
     var collapsedFolders by rememberSaveable { mutableStateOf(setOf<String>()) }
+    val visibleRootFiles = remember(files, collapsedFolders) {
+        files.filter { entry ->
+            val parts = entry.path.split('/')
+            if (parts.size <= 1) {
+                true
+            } else {
+                var hidden = false
+                var cur = ""
+                for (i in 0 until parts.size - 1) {
+                    cur = if (cur.isEmpty()) parts[i] else "$cur/${parts[i]}"
+                    if (collapsedFolders.contains(cur)) {
+                        hidden = true
+                        break
+                    }
+                }
+                !hidden
+            }
+        }
+    }
 
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item {
@@ -5906,25 +5925,6 @@ private fun FilesTab(
             if (!loading && files.isEmpty()) {
                 item { EmptyState(Icons.Default.Folder, "No files in root", "Workspace root is empty.") }
             } else {
-                val visibleRootFiles = remember(files, collapsedFolders) {
-                    files.filter { entry ->
-                        val parts = entry.path.split('/')
-                        if (parts.size <= 1) {
-                            true
-                        } else {
-                            var hidden = false
-                            var cur = ""
-                            for (i in 0 until parts.size - 1) {
-                                cur = if (cur.isEmpty()) parts[i] else "$cur/${parts[i]}"
-                                if (collapsedFolders.contains(cur)) {
-                                    hidden = true
-                                    break
-                                }
-                            }
-                            !hidden
-                        }
-                    }
-                }
                 items(visibleRootFiles, key = { "root-${it.path}" }) { entry ->
                     val isCollapsed = collapsedFolders.contains(entry.path)
                     RootWorkspaceFileRow(
