@@ -20,6 +20,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -4946,29 +4950,6 @@ private fun FileViewerScreen(
     }
 }
 
-private fun buildExpandedFileTree(
-    files: List<WorkspaceEntry>,
-    expandedSet: Set<String>,
-): List<WorkspaceEntry> {
-    val byParent = files.groupBy { entry ->
-        if (entry.path.contains('/')) entry.path.substringBeforeLast('/') else ""
-    }
-    val result = mutableListOf<WorkspaceEntry>()
-    fun appendChildren(parentPath: String) {
-        val children = byParent[parentPath].orEmpty().sortedWith(
-            compareByDescending<WorkspaceEntry> { it.isDirectory }.thenBy { it.name.lowercase() }
-        )
-        for (child in children) {
-            result.add(child)
-            if (child.isDirectory && child.path in expandedSet) {
-                appendChildren(child.path)
-            }
-        }
-    }
-    appendChildren("")
-    return result
-}
-
 @Composable
 private fun VersionShimmerPlaceholderCard(
     projectSlug: String,
@@ -4984,45 +4965,243 @@ private fun VersionShimmerPlaceholderCard(
         ),
         label = "shimmerAlpha",
     )
-    val cardShape = RoundedCornerShape(2.dp)
+    val cardShape = RoundedCornerShape(8.dp)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = cardShape,
         color = Color.White.copy(alpha = alpha),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = alpha)),
+        border = BorderStroke(1.dp, Color(0xFFE5E7EB).copy(alpha = alpha)),
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_custom_zip),
                 contentDescription = null,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(22.dp),
                 tint = Color.Black.copy(alpha = alpha),
             )
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     text = "${projectSlug}.zip",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
                     color = Color.Black.copy(alpha = alpha),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = "${versionTag.lowercase()} · preparing...",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+                    fontSize = 12.sp,
+                    color = Color(0xFF6B7280).copy(alpha = alpha),
                 )
             }
             CircularProgressIndicator(
                 modifier = Modifier.size(16.dp),
                 strokeWidth = 2.dp,
                 color = MaterialTheme.colorScheme.primary.copy(alpha = alpha),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FileTypeIcon(
+    name: String,
+    isDirectory: Boolean,
+    isOpen: Boolean = false,
+    modifier: Modifier = Modifier.size(20.dp),
+) {
+    if (isDirectory) {
+        Icon(
+            painter = painterResource(R.drawable.ic_custom_folder),
+            contentDescription = null,
+            modifier = modifier,
+            tint = Color(0xFF0284C7),
+        )
+        return
+    }
+
+    val ext = name.substringAfterLast('.', "").lowercase()
+    when (ext) {
+        "html", "htm" -> {
+            Box(
+                modifier = modifier
+                    .border(1.2.dp, Color(0xFFE44D26), RoundedCornerShape(3.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "<>",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFE44D26),
+                    lineHeight = 10.sp,
+                )
+            }
+        }
+        "css", "scss", "sass", "less" -> {
+            Box(
+                modifier = modifier
+                    .border(1.2.dp, Color(0xFF264DE4), RoundedCornerShape(3.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "#",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF264DE4),
+                    lineHeight = 11.sp,
+                )
+            }
+        }
+        "js", "mjs", "cjs" -> {
+            Box(
+                modifier = modifier
+                    .border(1.2.dp, Color(0xFFD97706), RoundedCornerShape(3.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "JS",
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFD97706),
+                    lineHeight = 9.sp,
+                )
+            }
+        }
+        "ts", "mts", "cts" -> {
+            Box(
+                modifier = modifier
+                    .border(1.2.dp, Color(0xFF2563EB), RoundedCornerShape(3.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "TS",
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF2563EB),
+                    lineHeight = 9.sp,
+                )
+            }
+        }
+        "jsx" -> {
+            Box(
+                modifier = modifier
+                    .border(1.2.dp, Color(0xFF0EA5E9), RoundedCornerShape(3.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "JSX",
+                    fontSize = 7.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0EA5E9),
+                    lineHeight = 8.sp,
+                )
+            }
+        }
+        "tsx" -> {
+            Box(
+                modifier = modifier
+                    .border(1.2.dp, Color(0xFF3B82F6), RoundedCornerShape(3.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "TSX",
+                    fontSize = 7.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF3B82F6),
+                    lineHeight = 8.sp,
+                )
+            }
+        }
+        "json", "jsonl" -> {
+            Box(
+                modifier = modifier
+                    .border(1.2.dp, Color(0xFFB45309), RoundedCornerShape(3.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "{}",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFB45309),
+                    lineHeight = 10.sp,
+                )
+            }
+        }
+        "md", "markdown" -> {
+            Box(
+                modifier = modifier
+                    .border(1.2.dp, Color(0xFF4B5563), RoundedCornerShape(3.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "MD",
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF4B5563),
+                    lineHeight = 9.sp,
+                )
+            }
+        }
+        "txt", "log" -> {
+            Box(
+                modifier = modifier
+                    .border(1.2.dp, Color(0xFF6B7280), RoundedCornerShape(3.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "TXT",
+                    fontSize = 7.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF6B7280),
+                    lineHeight = 8.sp,
+                )
+            }
+        }
+        "pdf" -> {
+            Box(
+                modifier = modifier
+                    .border(1.2.dp, Color(0xFFDC2626), RoundedCornerShape(3.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "PDF",
+                    fontSize = 7.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFDC2626),
+                    lineHeight = 8.sp,
+                )
+            }
+        }
+        "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico" -> {
+            Icon(
+                painter = painterResource(R.drawable.ic_photos),
+                contentDescription = null,
+                modifier = modifier,
+                tint = Color(0xFF059669),
+            )
+        }
+        "zip", "tar", "gz", "rar", "7z" -> {
+            Icon(
+                painter = painterResource(R.drawable.ic_custom_zip),
+                contentDescription = null,
+                modifier = modifier,
+                tint = Color(0xFF8B5CF6),
+            )
+        }
+        else -> {
+            Icon(
+                painter = painterResource(R.drawable.ic_custom_file),
+                contentDescription = null,
+                modifier = modifier,
+                tint = Color(0xFF6B7280),
             )
         }
     }
@@ -5039,18 +5218,56 @@ private fun ZipContentsScreen(
     onDownloadFile: (WorkspaceEntry) -> Unit,
     onRenameZip: ((String) -> Unit)? = null,
 ) {
-    BackHandler(onBack = onBack)
+    var currentPath by rememberSaveable(zipName) { mutableStateOf("") }
+    val canGoUp = currentPath.isNotEmpty()
+    val onNavigateUp = {
+        if (currentPath.contains('/')) {
+            currentPath = currentPath.substringBeforeLast('/')
+        } else {
+            currentPath = ""
+        }
+    }
 
-    var expandedDirectories by rememberSaveable(zipName) { mutableStateOf(emptyList<String>()) }
-    val expandedSet = expandedDirectories.toSet()
-    val visibleFiles = remember(files, expandedSet) {
-        buildExpandedFileTree(files, expandedSet)
+    BackHandler(enabled = true) {
+        if (canGoUp) {
+            onNavigateUp()
+        } else {
+            onBack()
+        }
     }
-    val directChildCounts = remember(files) {
-        files.filter { it.path.contains('/') }
-            .groupingBy { it.path.substringBeforeLast('/') }
-            .eachCount()
+
+    val prefix = if (currentPath.isEmpty()) "" else "$currentPath/"
+
+    val subfolders = remember(files, currentPath) {
+        val folderNames = mutableSetOf<String>()
+        files.forEach { entry ->
+            val rel = if (currentPath.isEmpty()) entry.path else if (entry.path.startsWith(prefix)) entry.path.removePrefix(prefix) else null
+            if (rel != null && rel.isNotEmpty()) {
+                if (rel.contains('/')) {
+                    folderNames.add(rel.substringBefore('/'))
+                } else if (entry.isDirectory) {
+                    folderNames.add(rel)
+                }
+            }
+        }
+        folderNames.sortedWith(String.CASE_INSENSITIVE_ORDER)
     }
+
+    val directFiles = remember(files, currentPath) {
+        files.filter { entry ->
+            if (entry.isDirectory) false
+            else if (currentPath.isEmpty()) {
+                !entry.path.contains('/')
+            } else {
+                entry.path.startsWith(prefix) && !entry.path.removePrefix(prefix).contains('/')
+            }
+        }.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+    }
+
+    val fileRoot = LocalAttachmentRoot.current
+    val fileContext = LocalContext.current
+    val fileClipboard = LocalClipboardManager.current
+    val fileScope = rememberCoroutineScope()
     var zipMenuOpen by remember { mutableStateOf(false) }
     var showRenameZipDialog by remember { mutableStateOf(false) }
     var renameZipText by remember(zipName) { mutableStateOf(zipName) }
@@ -5059,20 +5276,31 @@ private fun ZipContentsScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
-                    Text(
-                        text = zipName,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = if (currentPath.isEmpty()) zipName else currentPath.substringAfterLast('/'),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (currentPath.isNotEmpty()) {
+                            Text(
+                                text = "$zipName / $currentPath",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { if (canGoUp) onNavigateUp() else onBack() }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back to files",
+                            contentDescription = if (canGoUp) "Go back up" else "Back to files",
                             tint = MaterialTheme.colorScheme.onSurface,
                         )
                     }
@@ -5134,138 +5362,130 @@ private fun ZipContentsScreen(
             )
         },
     ) { innerPadding ->
-        LazyColumn(
+        Surface(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            color = Color.White,
         ) {
-            items(visibleFiles, key = { it.path }) { entry ->
-                val rowShape = RoundedCornerShape(2.dp)
-                if (entry.isDirectory) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp)
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_custom_folder),
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "${entry.name} (${directChildCounts[entry.path] ?: 0})",
-                            modifier = Modifier.weight(1f),
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Box(
+            if (subfolders.isEmpty() && directFiles.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "Folder is empty",
+                        fontSize = 14.sp,
+                        color = Color(0xFF9CA3AF),
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                ) {
+                    // 1. Folders first
+                    items(subfolders, key = { "folder-$it" }) { folderName ->
+                        Row(
                             modifier = Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(4.dp))
+                                .fillMaxWidth()
+                                .heightIn(min = 46.dp)
                                 .clickable {
-                                    expandedDirectories = if (entry.path in expandedSet) {
-                                        expandedDirectories.filterNot { it == entry.path || it.startsWith("${entry.path}/") }
-                                    } else {
-                                        expandedDirectories + entry.path
-                                    }
-                                },
-                            contentAlignment = Alignment.Center,
+                                    currentPath = if (currentPath.isEmpty()) folderName else "$currentPath/$folderName"
+                                }
+                                .padding(horizontal = 4.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(
-                                if (entry.path in expandedSet) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = if (entry.path in expandedSet) "Collapse folder" else "Expand folder",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            FileTypeIcon(
+                                name = folderName,
+                                isDirectory = true,
+                                modifier = Modifier.size(20.dp),
                             )
-                        }
-                    }
-                } else {
-                    val isChanged = entry.isNewInCurrentVersion
-                    val itemColor = if (isChanged) Color(0xFF2E7D32) else Color.Black
-                    val fileRoot = LocalAttachmentRoot.current
-                    val fileContext = LocalContext.current
-                    val fileClipboard = LocalClipboardManager.current
-                    val fileScope = rememberCoroutineScope()
-                    val ext = entry.name.substringAfterLast('.', "").uppercase()
-                    val cardShape = RoundedCornerShape(12.dp)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp)
-                            .clip(cardShape)
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, cardShape)
-                            .background(Color.White, cardShape)
-                            .clickable { onOpenFile(entry) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(Color(0xFFF3EFE8)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                painter = painterResource(
-                                    if (entry.name.endsWith(".zip", ignoreCase = true)) R.drawable.ic_custom_zip else R.drawable.ic_custom_file
-                                ),
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = itemColor,
-                            )
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
+                            Spacer(Modifier.width(12.dp))
                             Text(
-                                text = entry.name,
-                                fontSize = 13.sp,
+                                text = folderName,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = itemColor,
+                                color = Color.Black,
+                                modifier = Modifier.weight(1f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            Text(
-                                text = if (ext.isNotEmpty()) "$ext · ${formatFileSize(entry.sizeBytes)}" else formatFileSize(entry.sizeBytes),
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "Open folder",
+                                modifier = Modifier.size(18.dp),
+                                tint = Color(0xFF9CA3AF),
                             )
                         }
-                        FileActionsMenu(
-                            onCopy = {
-                                fileScope.launch {
-                                    val text = withContext(Dispatchers.IO) {
-                                        resolveWorkspaceFile(fileRoot, entry.path, fileContext)?.readText(Charsets.UTF_8)
-                                    }
-                                    if (text != null) {
-                                        fileClipboard.setText(AnnotatedString(text))
-                                        Toast.makeText(fileContext, "Copied ${entry.name}", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        Toast.makeText(fileContext, "Couldn't read ${entry.name}", Toast.LENGTH_SHORT).show()
-                                    }
+                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 0.8.dp)
+                    }
+
+                    // 2. Files below
+                    items(directFiles, key = { "file-${it.path}" }) { entry ->
+                        val isChanged = entry.isNewInCurrentVersion
+                        val itemColor = if (isChanged) Color(0xFF16A34A) else Color.Black
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 46.dp)
+                                .clickable { onOpenFile(entry) }
+                                .padding(horizontal = 4.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            FileTypeIcon(
+                                name = entry.name,
+                                isDirectory = false,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = entry.name,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    color = itemColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (entry.sizeBytes > 0) {
+                                    Text(
+                                        text = formatFileSize(entry.sizeBytes),
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF9CA3AF),
+                                    )
                                 }
-                            },
-                            onDownload = { onDownloadFile(entry) },
-                            onShare = {
-                                fileScope.launch {
-                                    val file = withContext(Dispatchers.IO) { resolveWorkspaceFile(fileRoot, entry.path, fileContext) }
-                                    if (file != null) {
-                                        fileContext.startActivity(Intent.createChooser(shareFileIntent(fileContext, file), "Share ${entry.name}"))
-                                    } else {
-                                        Toast.makeText(fileContext, "Couldn't read ${entry.name}", Toast.LENGTH_SHORT).show()
+                            }
+                            FileActionsMenu(
+                                onCopy = {
+                                    fileScope.launch {
+                                        val text = withContext(Dispatchers.IO) {
+                                            resolveWorkspaceFile(fileRoot, entry.path, fileContext)?.readText(Charsets.UTF_8)
+                                        }
+                                        if (text != null) {
+                                            fileClipboard.setText(AnnotatedString(text))
+                                            Toast.makeText(fileContext, "Copied ${entry.name}", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(fileContext, "Couldn't read ${entry.name}", Toast.LENGTH_SHORT).show()
+                                        }
                                     }
-                                }
-                            },
-                        )
+                                },
+                                onDownload = { onDownloadFile(entry) },
+                                onShare = {
+                                    fileScope.launch {
+                                        val file = withContext(Dispatchers.IO) { resolveWorkspaceFile(fileRoot, entry.path, fileContext) }
+                                        if (file != null) {
+                                            fileContext.startActivity(Intent.createChooser(shareFileIntent(fileContext, file), "Share ${entry.name}"))
+                                        } else {
+                                            Toast.makeText(fileContext, "Couldn't read ${entry.name}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 0.8.dp)
                     }
                 }
             }
@@ -5393,122 +5613,102 @@ private fun FilesTab(
         if (projectVersions.isNotEmpty()) {
             val sortedVersions = projectVersions.sortedByDescending { it.versionNumber }
             items(sortedVersions, key = { "version-${it.versionNumber}" }) { version ->
-                val cardShape = RoundedCornerShape(2.dp)
                 val count = if (version.filesCount > 0) version.filesCount else files.count { !it.isDirectory }
                 val fileLabel = if (count == 1) "1 file" else "$count files"
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onOpenVersionZip(version, "${projectSlug}.zip") },
-                    shape = cardShape,
+                    shape = RoundedCornerShape(8.dp),
                     color = Color.White,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                    shadowElevation = 0.dp,
+                    tonalElevation = 0.dp,
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_custom_zip),
                             contentDescription = null,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(22.dp),
                             tint = Color.Black,
                         )
-                        Spacer(Modifier.width(10.dp))
+                        Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
                                 text = "${projectSlug}.zip",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
                                 color = Color.Black,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                text = "${version.versionTag.lowercase()} · $fileLabel",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = "$fileLabel · ${version.versionTag.lowercase()}",
+                                fontSize = 12.sp,
+                                color = Color(0xFF6B7280),
                             )
                         }
-                        IconButton(
-                            onClick = { onExportVersionZip(version) },
-                            modifier = Modifier.size(32.dp),
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_custom_download),
-                                contentDescription = "Download project zip ${version.versionTag}",
-                                modifier = Modifier.size(18.dp),
-                                tint = Color.Black,
-                            )
-                        }
-                        Spacer(Modifier.width(4.dp))
                         Icon(
-                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                             contentDescription = "Open zip contents",
                             modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = Color(0xFF9CA3AF),
                         )
                     }
                 }
             }
         } else if (hasFiles) {
             item(key = "project-zip-card") {
-                val cardShape = RoundedCornerShape(2.dp)
+                val count = files.count { !it.isDirectory }
+                val fileLabel = if (count == 1) "1 file" else "$count files"
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onOpenZip("${projectSlug}.zip") },
-                    shape = cardShape,
+                    shape = RoundedCornerShape(8.dp),
                     color = Color.White,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                    shadowElevation = 0.dp,
+                    tonalElevation = 0.dp,
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_custom_zip),
                             contentDescription = null,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(22.dp),
                             tint = Color.Black,
                         )
-                        Spacer(Modifier.width(10.dp))
+                        Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
                                 text = "${projectSlug}.zip",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
                                 color = Color.Black,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                text = "$zipVersionLabel · ${files.count { !it.isDirectory }} files",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = "$fileLabel · $zipVersionLabel",
+                                fontSize = 12.sp,
+                                color = Color(0xFF6B7280),
                             )
                         }
-                        IconButton(
-                            onClick = onExport,
-                            modifier = Modifier.size(32.dp),
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_custom_download),
-                                contentDescription = "Download project zip",
-                                modifier = Modifier.size(18.dp),
-                                tint = Color.Black,
-                            )
-                        }
-                        Spacer(Modifier.width(4.dp))
                         Icon(
-                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                             contentDescription = "Open zip contents",
                             modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = Color(0xFF9CA3AF),
                         )
                     }
                 }
@@ -5536,7 +5736,7 @@ private fun ChatTab(
     onPipelineApprove: () -> Unit = {},
     onPipelineReject: () -> Unit = {},
     onPipelineSubmitRejection: (String) -> Unit = {},
-    planModeEnabled: Boolean = true,
+    planModeEnabled: Boolean = false,
     onTogglePlanMode: (Boolean) -> Unit = {},
     onReassignSubagent: (String, String) -> Unit = { _, _ -> },
     listState: LazyListState,
@@ -6267,18 +6467,25 @@ private fun ChatTab(
                         Spacer(Modifier.weight(1f))
 
                         Box {
+                            val chevronRotation by animateFloatAsState(
+                                targetValue = if (planMenuOpen) 180f else 0f,
+                                animationSpec = tween(150),
+                                label = "chevronRotation",
+                            )
+
                             Surface(
-                                onClick = { planMenuOpen = true },
-                                modifier = Modifier.height(36.dp),
-                                shape = RoundedCornerShape(18.dp),
+                                onClick = { planMenuOpen = !planMenuOpen },
+                                modifier = Modifier.height(34.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 color = Color.White,
-                                shadowElevation = 1.dp,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                shadowElevation = 0.dp,
+                                tonalElevation = 0.dp,
+                                border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxHeight()
-                                        .padding(start = 14.dp, end = 10.dp),
+                                        .padding(horizontal = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(
@@ -6287,94 +6494,135 @@ private fun ChatTab(
                                         fontWeight = FontWeight.Medium,
                                         color = Color.Black,
                                     )
+                                    Spacer(Modifier.width(4.dp))
                                     Icon(
                                         imageVector = Icons.Default.ArrowDropDown,
                                         contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .rotate(chevronRotation),
                                         tint = Color.Black,
                                     )
                                 }
                             }
-                            DropdownMenu(
-                                expanded = planMenuOpen,
-                                onDismissRequest = { planMenuOpen = false },
-                                containerColor = Color.White,
-                                shape = RoundedCornerShape(16.dp),
-                                tonalElevation = 0.dp,
-                                shadowElevation = 6.dp,
-                                border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
-                                offset = DpOffset(x = 0.dp, y = (-4).dp),
-                                properties = PopupProperties(focusable = false),
-                            ) {
-                                Column(modifier = Modifier.width(165.dp)) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                planMenuOpen = false
-                                                onTogglePlanMode(false)
-                                            }
-                                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
+
+                            if (planMenuOpen) {
+                                Popup(
+                                    alignment = Alignment.BottomEnd,
+                                    onDismissRequest = { planMenuOpen = false },
+                                    properties = PopupProperties(focusable = true),
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = Color.White,
+                                        shadowElevation = 0.dp,
+                                        tonalElevation = 0.dp,
+                                        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Bolt,
-                                            contentDescription = null,
-                                            tint = Color.Black,
-                                            modifier = Modifier.size(24.dp),
-                                        )
-                                        Spacer(Modifier.width(14.dp))
-                                        Text(
-                                            text = "Build",
-                                            fontSize = 17.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Color.Black,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        if (!planModeEnabled) {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = Color.Black,
-                                                modifier = Modifier.size(24.dp),
-                                            )
-                                        }
-                                    }
-                                    HorizontalDivider(
-                                        color = Color(0xFFEEEEEE),
-                                        thickness = 1.dp,
-                                    )
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                planMenuOpen = false
-                                                onTogglePlanMode(true)
+                                        Column(modifier = Modifier.width(132.dp)) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        planMenuOpen = false
+                                                        onTogglePlanMode(false)
+                                                    }
+                                                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Bolt,
+                                                    contentDescription = null,
+                                                    tint = Color.Black,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    text = "Build",
+                                                    fontSize = 13.5.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = Color.Black,
+                                                    modifier = Modifier.weight(1f),
+                                                )
+                                                if (!planModeEnabled) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = null,
+                                                        tint = Color.Black,
+                                                        modifier = Modifier.size(16.dp),
+                                                    )
+                                                }
                                             }
-                                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Checklist,
-                                            contentDescription = null,
-                                            tint = Color.Black,
-                                            modifier = Modifier.size(24.dp),
-                                        )
-                                        Spacer(Modifier.width(14.dp))
-                                        Text(
-                                            text = "Plan",
-                                            fontSize = 17.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Color.Black,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        if (planModeEnabled) {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = Color.Black,
-                                                modifier = Modifier.size(24.dp),
+
+                                            HorizontalDivider(
+                                                color = Color(0xFFF3F4F6),
+                                                thickness = 1.dp,
                                             )
+
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        planMenuOpen = false
+                                                        onTogglePlanMode(true)
+                                                    }
+                                                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.Checklist,
+                                                    contentDescription = null,
+                                                    tint = Color.Black,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    text = "Plan",
+                                                    fontSize = 13.5.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = Color.Black,
+                                                    modifier = Modifier.weight(1f),
+                                                )
+                                                if (planModeEnabled) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = null,
+                                                        tint = Color.Black,
+                                                        modifier = Modifier.size(16.dp),
+                                                    )
+                                                }
+                                            }
+
+                                            HorizontalDivider(
+                                                color = Color(0xFFE5E7EB),
+                                                thickness = 1.dp,
+                                            )
+
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(34.dp)
+                                                    .clickable { planMenuOpen = false }
+                                                    .padding(horizontal = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.End,
+                                            ) {
+                                                Text(
+                                                    text = if (planModeEnabled) "Plan" else "Build",
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = Color.Black,
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowDropDown,
+                                                    contentDescription = null,
+                                                    modifier = Modifier
+                                                        .size(16.dp)
+                                                        .rotate(180f),
+                                                    tint = Color.Black,
+                                                )
+                                            }
                                         }
                                     }
                                 }
