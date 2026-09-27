@@ -25,6 +25,7 @@ class RuntimeExecutionService : Service() {
     private var notificationTitle: String = "Coding agent is working"
     private var canStop: Boolean = true
     private var taskRunning: Boolean = false
+    private var isForeground: Boolean = false
 
     override fun onCreate() {
         super.onCreate()
@@ -35,6 +36,25 @@ class RuntimeExecutionService : Service() {
         intent?.getStringExtra(EXTRA_PROJECT_NAME)?.takeIf(String::isNotBlank)?.let { projectName = it }
         intent?.getStringExtra(EXTRA_TITLE)?.takeIf(String::isNotBlank)?.let { notificationTitle = it }
         if (intent?.hasExtra(EXTRA_CAN_STOP) == true) canStop = intent.getBooleanExtra(EXTRA_CAN_STOP, true)
+        // The OS starts a hard timeout the moment startForegroundService() is called, regardless
+        // of which action the first delivered intent carries. If that first intent happens to be
+        // PROGRESS/COMPLETE/CANCELLED (e.g. a fast-failing task posts COMPLETE before this process
+        // has finished cold-starting) the old code could return early without ever calling
+        // startForeground(), which the OS then kills with ForegroundServiceDidNotStartInTimeException.
+        // Calling it unconditionally here, before branching on action, guarantees it always happens.
+        if (!isForeground) {
+            runCatching {
+                startForeground(
+                    RUNNING_NOTIFICATION_ID,
+                    runningNotification(
+                        intent?.getStringExtra(EXTRA_DETAIL)?.takeIf { it.isNotBlank() }
+                            ?: "$notificationTitle in $projectName",
+                        includeStop = canStop,
+                    ),
+                )
+                isForeground = true
+            }
+        }
         when (intent?.action ?: ACTION_START) {
             ACTION_STOP -> {
                 RuntimeTaskController.requestStop()
@@ -67,16 +87,11 @@ class RuntimeExecutionService : Service() {
                 taskRunning = false
                 releaseWakeLock()
                 stopForeground(STOP_FOREGROUND_REMOVE)
+                isForeground = false
                 stopSelf()
             }
             else -> {
                 taskRunning = true
-                val initialDetail = intent?.getStringExtra(EXTRA_DETAIL)?.takeIf { it.isNotBlank() }
-                    ?: "$notificationTitle in $projectName"
-                startForeground(
-                    RUNNING_NOTIFICATION_ID,
-                    runningNotification(initialDetail, includeStop = canStop),
-                )
                 acquireWakeLock()
             }
         }
@@ -109,6 +124,7 @@ class RuntimeExecutionService : Service() {
         taskRunning = false
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
+        isForeground = false
         val notification = NotificationCompat.Builder(this, RESULT_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
