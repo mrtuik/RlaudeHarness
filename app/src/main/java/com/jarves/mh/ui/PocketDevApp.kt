@@ -131,6 +131,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Description
@@ -229,6 +230,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -236,6 +238,7 @@ import androidx.compose.ui.text.googlefonts.GoogleFont
 import androidx.compose.ui.text.googlefonts.Font
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -4555,6 +4558,7 @@ private fun WorkspaceScreen(
         containerColor = Color.White,
         topBar = {
             if (selectedTab != WorkspaceTab.CHAT) CenterAlignedTopAppBar(
+                modifier = Modifier.padding(top = 8.dp),
                 title = { Text(selectedTab.label, fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = { selectedTab = WorkspaceTab.CHAT }) {
@@ -4563,7 +4567,7 @@ private fun WorkspaceScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
             ) else CenterAlignedTopAppBar(
-                modifier = Modifier.height(76.dp),
+                modifier = Modifier.padding(top = 8.dp),
                 title = {
                     Text(
                         state.activeProject?.name.orEmpty(),
@@ -4657,6 +4661,7 @@ private fun WorkspaceScreen(
                     thinkingActive = state.liveThinking,
                     agentKind = state.agentKind,
                     pendingAttachments = state.pendingAttachments,
+                    workspaceFiles = state.workspaceFiles,
                     onAttach = {
                         attachmentLauncher.launch(arrayOf("*/*"))
                     },
@@ -5560,6 +5565,7 @@ private fun ChatTab(
     onDownloadZip: (List<String>, String) -> Unit = { _, _ -> },
     onRenameAttachment: (String, String) -> Unit = { _, _ -> },
     onOpenFile: (WorkspaceEntry) -> Unit = {},
+    workspaceFiles: List<WorkspaceEntry> = emptyList(),
 ) {
     val view = LocalView.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -5570,23 +5576,26 @@ private fun ChatTab(
         view.keepScreenOn = isRunning
         onDispose { view.keepScreenOn = false }
     }
-    var prompt by rememberSaveable(draftKey) { mutableStateOf(draftPrompt) }
+    var promptValue by rememberSaveable(draftKey, stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(draftPrompt, TextRange(draftPrompt.length)))
+    }
+    val prompt = promptValue.text
     LaunchedEffect(draftKey) {
-        if (prompt != draftPrompt) {
-            prompt = draftPrompt
+        if (promptValue.text != draftPrompt) {
+            promptValue = TextFieldValue(draftPrompt, TextRange(draftPrompt.length))
         }
     }
-    LaunchedEffect(prompt) {
-        if (prompt.isEmpty()) {
-            onDraftChange(prompt)
+    LaunchedEffect(promptValue.text) {
+        if (promptValue.text.isEmpty()) {
+            onDraftChange(promptValue.text)
         } else {
             delay(200)
-            onDraftChange(prompt)
+            onDraftChange(promptValue.text)
         }
     }
     DisposableEffect(draftKey) {
         onDispose {
-            onDraftChange(prompt)
+            onDraftChange(promptValue.text)
         }
     }
     val focusRequester = remember { FocusRequester() }
@@ -5616,17 +5625,36 @@ private fun ChatTab(
     val displayMessages = remember(messages) {
         messages.filterNot { !it.fromUser && it.text.startsWith("Hi! Tell me") }
     }
-    val atMentionQuery = remember(prompt) {
-        val lastAt = prompt.lastIndexOf('@')
-        if (lastAt >= 0 && (lastAt == 0 || prompt[lastAt - 1].isWhitespace())) {
-            val query = prompt.substring(lastAt + 1)
-            if (!query.contains(' ') && !query.contains('\n')) query else null
-        } else null
-    }
+    val cursor = promptValue.selection.end
+    val textBeforeCursor = if (cursor in 0..promptValue.text.length) promptValue.text.substring(0, cursor) else promptValue.text
+    val lastAt = textBeforeCursor.lastIndexOf('@')
+    val atMentionQuery = if (lastAt >= 0 && (lastAt == 0 || textBeforeCursor[lastAt - 1].isWhitespace())) {
+        val q = textBeforeCursor.substring(lastAt + 1)
+        if (!q.contains(' ') && !q.contains('\n')) q else null
+    } else null
+    val showPhotosAction = atMentionQuery != null && (
+        atMentionQuery.isEmpty() ||
+        "photos".contains(atMentionQuery, ignoreCase = true) ||
+        "photo".contains(atMentionQuery, ignoreCase = true)
+    )
+    val showFilesAction = atMentionQuery != null && (
+        atMentionQuery.isEmpty() ||
+        "files".contains(atMentionQuery, ignoreCase = true) ||
+        "file".contains(atMentionQuery, ignoreCase = true)
+    )
     val matchingMentionAttachments = remember(atMentionQuery, pendingAttachments) {
-        if (atMentionQuery == null || pendingAttachments.isEmpty()) emptyList()
+        if (atMentionQuery == null) emptyList()
         else pendingAttachments.filter { it.displayName.contains(atMentionQuery, ignoreCase = true) }
     }
+    val matchingWorkspaceFiles = remember(atMentionQuery, workspaceFiles) {
+        if (atMentionQuery == null || atMentionQuery.isEmpty()) emptyList()
+        else workspaceFiles.filter {
+            it.name.contains(atMentionQuery, ignoreCase = true) || it.path.contains(atMentionQuery, ignoreCase = true)
+        }.take(5)
+    }
+    val hasMentionOptions = atMentionQuery != null && (
+        showPhotosAction || showFilesAction || matchingMentionAttachments.isNotEmpty() || matchingWorkspaceFiles.isNotEmpty()
+    )
     // True while the newest item (message, live panel, or approval card) is on screen.
     val readerAtBottom by remember {
         derivedStateOf {
@@ -5679,7 +5707,7 @@ private fun ChatTab(
                                 onEdit = if (!readOnly) {
                                     { editedMessage ->
                                         if (!isRunning) {
-                                            prompt = editedMessage.text
+                                            promptValue = TextFieldValue(editedMessage.text, TextRange(editedMessage.text.length))
                                             onEditMessage(editedMessage)
                                             chatScope.launch {
                                                 focusRequester.requestFocus()
@@ -5934,36 +5962,115 @@ private fun ChatTab(
 
                     val context = LocalContext.current
 
-                    if (matchingMentionAttachments.isNotEmpty()) {
+                    val removeMentionAndInvoke: (() -> Unit) -> Unit = { action ->
+                        if (lastAt >= 0) {
+                            val prefix = promptValue.text.substring(0, lastAt)
+                            val suffix = if (cursor in 0..promptValue.text.length) promptValue.text.substring(cursor) else ""
+                            promptValue = TextFieldValue("$prefix$suffix", TextRange(prefix.length))
+                        }
+                        action()
+                    }
+                    val insertMention: (String) -> Unit = { tagText ->
+                        if (lastAt >= 0) {
+                            val prefix = promptValue.text.substring(0, lastAt)
+                            val suffix = if (cursor in 0..promptValue.text.length) promptValue.text.substring(cursor) else ""
+                            val replacement = "@$tagText "
+                            val newText = "$prefix$replacement$suffix"
+                            val newCursor = prefix.length + replacement.length
+                            promptValue = TextFieldValue(newText, TextRange(newCursor))
+                        }
+                    }
+
+                    if (hasMentionOptions) {
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 6.dp),
-                            shape = RoundedCornerShape(8.dp),
+                                .padding(bottom = 8.dp),
+                            shape = RoundedCornerShape(12.dp),
                             color = Color.White,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                             shadowElevation = 3.dp,
                         ) {
-                            Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .heightIn(max = 220.dp)
+                                    .verticalScroll(rememberScrollState()),
+                            ) {
                                 Text(
-                                    text = "ATTACHMENTS",
+                                    text = "TAG OR ATTACH",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                                 )
+                                if (showPhotosAction) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { removeMentionAndInvoke(onPickPhotos) }
+                                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(R.drawable.ic_photos),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Photos",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                            )
+                                            Text(
+                                                text = "Tag photo from gallery",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                }
+                                if (showFilesAction) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { removeMentionAndInvoke(onAttach) }
+                                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(R.drawable.ic_files),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Files",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                            )
+                                            Text(
+                                                text = "Tag file or document",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                }
                                 matchingMentionAttachments.take(5).forEach { att ->
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable {
-                                                val lastAt = prompt.lastIndexOf('@')
-                                                if (lastAt >= 0) {
-                                                    val prefix = prompt.substring(0, lastAt)
-                                                    prompt = "$prefix@${att.displayName} "
-                                                }
-                                            }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            .clickable { insertMention(att.displayName) }
+                                            .padding(horizontal = 14.dp, vertical = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Icon(
@@ -5971,10 +6078,10 @@ private fun ChatTab(
                                                 if (att.mimeType.startsWith("image/")) R.drawable.ic_photos else R.drawable.ic_custom_file
                                             ),
                                             contentDescription = null,
-                                            modifier = Modifier.size(16.dp),
+                                            modifier = Modifier.size(18.dp),
                                             tint = MaterialTheme.colorScheme.primary,
                                         )
-                                        Spacer(Modifier.width(8.dp))
+                                        Spacer(Modifier.width(10.dp))
                                         Text(
                                             text = "@${att.displayName}",
                                             fontSize = 13.sp,
@@ -5985,13 +6092,51 @@ private fun ChatTab(
                                         )
                                     }
                                 }
+                                matchingWorkspaceFiles.forEach { entry ->
+                                    val isImg = entry.name.matches(Regex(".*\\.(png|jpg|jpeg|webp|gif|svg)$", RegexOption.IGNORE_CASE))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { insertMention(entry.path) }
+                                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(if (isImg) R.drawable.ic_photos else R.drawable.ic_custom_file),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                text = "@${entry.name}",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            if (entry.path != entry.name) {
+                                                Text(
+                                                    text = entry.path,
+                                                    fontSize = 10.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
 
                     BasicTextField(
-                        value = prompt,
-                        onValueChange = { input ->
+                        value = promptValue,
+                        onValueChange = { inputVal ->
+                            val input = inputVal.text
                             val isImageUri = (input.startsWith("content://") || input.startsWith("file://")) &&
                                 (input.contains("image") || input.endsWith(".png") || input.endsWith(".jpg") || input.endsWith(".jpeg") || input.endsWith(".webp") || input.endsWith(".gif"))
                             if (isImageUri) {
@@ -5999,9 +6144,9 @@ private fun ChatTab(
                                     val uri = Uri.parse(input.trim())
                                     onAddAttachments(listOf(uri))
                                 }.onSuccess {
-                                    prompt = ""
+                                    promptValue = TextFieldValue("")
                                 }.onFailure {
-                                    prompt = input
+                                    promptValue = inputVal
                                 }
                             } else {
                                 val isVeryLong = input.length >= 800 || (input.length >= 350 && input.count { it == '\n' } >= 8)
@@ -6015,13 +6160,13 @@ private fun ChatTab(
                                     }
                                     if (chunk.length >= 500 || (chunk.length >= 250 && chunk.count { it == '\n' } >= 6)) {
                                         onAddTextAttachment(chunk)
-                                        prompt = if (prompt.isNotBlank() && (input.startsWith(prompt) || input.endsWith(prompt))) prompt else ""
+                                        promptValue = if (prompt.isNotBlank() && (input.startsWith(prompt) || input.endsWith(prompt))) promptValue else TextFieldValue("")
                                         Toast.makeText(context, "Converted long text to attachment", Toast.LENGTH_SHORT).show()
                                     } else {
-                                        prompt = input
+                                        promptValue = inputVal
                                     }
                                 } else {
-                                    prompt = input
+                                    promptValue = inputVal
                                 }
                             }
                         },
@@ -6154,32 +6299,85 @@ private fun ChatTab(
                                 expanded = planMenuOpen,
                                 onDismissRequest = { planMenuOpen = false },
                                 containerColor = Color.White,
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 tonalElevation = 0.dp,
-                                shadowElevation = 1.dp,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                offset = DpOffset(x = 0.dp, y = 4.dp),
+                                shadowElevation = 6.dp,
+                                border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                                offset = DpOffset(x = 0.dp, y = (-4).dp),
                                 properties = PopupProperties(focusable = false),
                             ) {
-                                DropdownMenuItem(
-                                    text = { Text("Build") },
-                                    leadingIcon = { Icon(Icons.Outlined.Bolt, null, tint = Color.Black) },
-                                    trailingIcon = { if (!planModeEnabled) Icon(Icons.Default.Check, null, tint = Color.Black) },
-                                    onClick = {
-                                        planMenuOpen = false
-                                        onTogglePlanMode(false)
-                                    },
-                                )
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
-                                DropdownMenuItem(
-                                    text = { Text("Plan") },
-                                    leadingIcon = { Icon(Icons.Outlined.Checklist, null, tint = Color.Black) },
-                                    trailingIcon = { if (planModeEnabled) Icon(Icons.Default.Check, null, tint = Color.Black) },
-                                    onClick = {
-                                        planMenuOpen = false
-                                        onTogglePlanMode(true)
-                                    },
-                                )
+                                Column(modifier = Modifier.width(165.dp)) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                planMenuOpen = false
+                                                onTogglePlanMode(false)
+                                            }
+                                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Bolt,
+                                            contentDescription = null,
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(24.dp),
+                                        )
+                                        Spacer(Modifier.width(14.dp))
+                                        Text(
+                                            text = "Build",
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color.Black,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        if (!planModeEnabled) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = Color.Black,
+                                                modifier = Modifier.size(24.dp),
+                                            )
+                                        }
+                                    }
+                                    HorizontalDivider(
+                                        color = Color(0xFFEEEEEE),
+                                        thickness = 1.dp,
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                planMenuOpen = false
+                                                onTogglePlanMode(true)
+                                            }
+                                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Checklist,
+                                            contentDescription = null,
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(24.dp),
+                                        )
+                                        Spacer(Modifier.width(14.dp))
+                                        Text(
+                                            text = "Plan",
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color.Black,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        if (planModeEnabled) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = Color.Black,
+                                                modifier = Modifier.size(24.dp),
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -6215,7 +6413,7 @@ private fun ChatTab(
                                                 keyboardController?.hide()
                                                 focusManager.clearFocus()
                                                 onSend(prompt)
-                                                prompt = ""
+                                                promptValue = TextFieldValue("")
                                             }
                                         },
                                     ),
