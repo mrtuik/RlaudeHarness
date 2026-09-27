@@ -657,6 +657,11 @@ internal fun antigravityWorkspacePrompt(projectSlug: String, prompt: String, pas
     Do not use write_to_file on a file that already exists unless the user explicitly asks for a full rewrite of that file. write_to_file is only for creating brand-new files.
     Rewriting an entire existing file from memory risks silently dropping or corrupting unrelated code elsewhere in the file and introduces avoidable syntax errors. A precise, minimal edit is always safer and faster than a full-file rewrite.
 
+    ASKING CLARIFYING QUESTIONS (ALLOWED AND ENCOURAGED):
+    If the user's request is genuinely ambiguous, missing a decision only they can make (e.g. which of two designs, which library, which behavior when requirements conflict), or could be done multiple valid ways with very different results, call the ask_question tool with a short question and 2-4 concrete options instead of silently guessing.
+    Do not overuse this — only ask when a wrong guess would mean real rework, not for things you can reasonably infer or where any reasonable choice is fine.
+    The user's answer will be sent back to you as the next message in this same task; continue directly from it without restarting your work.
+
     $AGENT_LESSON_REPORTING_INSTRUCTION
 
     ${if (pastMistakesSection.isNotBlank()) "$pastMistakesSection\n" else ""}
