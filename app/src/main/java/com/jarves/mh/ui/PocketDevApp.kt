@@ -224,6 +224,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
@@ -282,14 +287,11 @@ import com.jarves.mh.runtime.RuntimeExecutionService
 import com.jarves.mh.runtime.RuntimeSetupService
 import com.jarves.mh.runtime.supportsArm64Runtime
 import com.jarves.mh.runtime.AntigravityAuthStatus
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.runtime.withFrameNanos
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -499,6 +501,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onDraftChange = viewModel::updateDraftPrompt,
             onGetVersionFiles = viewModel::getVersionFiles,
             onExportVersionZip = viewModel::exportVersionZip,
+            onRenameFile = viewModel::renameWorkspaceFile,
         )
         else -> RootScreenHost(state, viewModel, projectsListState)
     }
@@ -4355,6 +4358,7 @@ private fun WorkspaceScreen(
     onDraftChange: (String) -> Unit = {},
     onGetVersionFiles: (Int) -> List<WorkspaceEntry> = { emptyList() },
     onExportVersionZip: (Int, Uri) -> Unit = { _, _ -> },
+    onRenameFile: (String, String) -> Unit = { _, _ -> },
 ) {
     BackHandler(onBack = onBack)
     val context = LocalContext.current
@@ -4477,6 +4481,9 @@ private fun WorkspaceScreen(
             onClose = {
                 onCloseFile()
                 selectedTab = WorkspaceTab.FILES
+            },
+            onRename = { newName ->
+                onRenameFile(state.openedFilePath ?: "", newName)
             },
         )
         return
@@ -4733,6 +4740,7 @@ private fun WorkspaceScreen(
                             val exportName = state.activeProject?.name?.let { projectSlug(it) } ?: state.activeProject?.slug ?: "project"
                             exportVersionZipLauncher.launch("$exportName.zip")
                         },
+                        onRenameFile = onRenameFile,
                     )
                 }
                 WorkspaceTab.TERMINAL -> Box(Modifier.fillMaxSize().navigationBarsPadding()) {
@@ -4837,6 +4845,7 @@ private fun FileViewerScreen(
     content: String?,
     loading: Boolean,
     onClose: () -> Unit,
+    onRename: ((String) -> Unit)? = null,
 ) {
     val fileName = filePath.substringAfterLast('/')
     val ext = fileName.substringAfterLast('.', "")
@@ -4844,6 +4853,8 @@ private fun FileViewerScreen(
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameDraft by remember(showRenameDialog, fileName) { mutableStateOf(fileName) }
 
     Scaffold(
         topBar = {
@@ -4858,6 +4869,19 @@ private fun FileViewerScreen(
                     IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close file") }
                 },
                 actions = {
+                    if (onRename != null) {
+                        IconButton(onClick = {
+                            renameDraft = fileName
+                            showRenameDialog = true
+                        }) {
+                            Icon(
+                                imageVector = ImageVector.vectorResource(R.drawable.ic_write),
+                                contentDescription = "Rename file",
+                                tint = Color.Black,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
                     if (!content.isNullOrEmpty()) {
                         IconButton(onClick = {
                             clipboard.setText(AnnotatedString(content))
@@ -4887,6 +4911,41 @@ private fun FileViewerScreen(
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
+            if (showRenameDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRenameDialog = false },
+                    title = { Text("Rename", fontWeight = FontWeight.Bold, color = Color.Black) },
+                    text = {
+                        OutlinedTextField(
+                            value = renameDraft,
+                            onValueChange = { renameDraft = it },
+                            singleLine = true,
+                            label = { Text("File name") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                val trimmed = renameDraft.trim()
+                                if (trimmed.isNotBlank()) {
+                                    onRename?.invoke(trimmed)
+                                }
+                                showRenameDialog = false
+                            }
+                        ) {
+                            Text("Rename", fontWeight = FontWeight.Bold, color = Color.Black)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRenameDialog = false }) {
+                            Text("Cancel", color = Color.Gray)
+                        }
+                    },
+                    containerColor = Color.White,
+                    shape = RoundedCornerShape(12.dp),
+                )
+            }
             when {
                 loading -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -5524,6 +5583,58 @@ private fun ZipContentsScreen(
 }
 
 @Composable
+private fun SquareZipIcon(
+    modifier: Modifier = Modifier.size(22.dp),
+    tint: Color = Color.Black,
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val strokeWidth = (w * 0.08f).coerceAtLeast(1.5f)
+        val cornerRadius = CornerRadius(w * 0.20f, h * 0.20f)
+
+        // Outer rounded square border
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f),
+            size = Size(w - strokeWidth, h - strokeWidth),
+            cornerRadius = cornerRadius,
+            style = Stroke(width = strokeWidth),
+        )
+
+        // Centered zipper seam teeth
+        val centerX = w * 0.5f
+        val toothW = w * 0.16f
+        val toothH = h * 0.065f
+        val teethTop = h * 0.20f
+        val teethSpacing = h * 0.11f
+
+        for (i in 0..2) {
+            val y = teethTop + i * teethSpacing
+            val left = if (i % 2 == 0) centerX - toothW else centerX
+            drawRect(
+                color = tint,
+                topLeft = Offset(left, y),
+                size = Size(toothW, toothH),
+                style = Fill,
+            )
+        }
+
+        // Zipper pull slider
+        val pullW = w * 0.22f
+        val pullH = h * 0.20f
+        val pullTop = teethTop + 3 * teethSpacing
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(centerX - pullW / 2f, pullTop),
+            size = Size(pullW, pullH),
+            cornerRadius = CornerRadius(pullW * 0.25f, pullW * 0.25f),
+            style = Stroke(width = strokeWidth * 0.85f),
+        )
+    }
+}
+
+@Composable
 private fun FilesTab(
     files: List<WorkspaceEntry>,
     loading: Boolean,
@@ -5542,9 +5653,12 @@ private fun FilesTab(
     projectVersions: List<ProjectVersion> = emptyList(),
     onOpenVersionZip: (ProjectVersion, String) -> Unit = { _, _ -> },
     onExportVersionZip: (ProjectVersion) -> Unit = {},
+    onRenameFile: (String, String) -> Unit = { _, _ -> },
 ) {
     val hasFiles = files.any { !it.isDirectory }
     val zipVersionLabel = latestVersionTag.lowercase()
+    var activeSubTab by rememberSaveable { mutableStateOf("Imported") }
+    var collapsedFolders by rememberSaveable { mutableStateOf(setOf<String>()) }
 
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item {
@@ -5554,11 +5668,41 @@ private fun FilesTab(
             ) {
                 Text(
                     "Files",
-                    Modifier.weight(1f),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (!loading && hasFiles) {
+                Spacer(Modifier.width(12.dp))
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .height(18.dp)
+                        .background(Color(0xFFE5E7EB))
+                )
+                Spacer(Modifier.width(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    val tabs = listOf("Imported", "Root")
+                    tabs.forEach { tabName ->
+                        val isSelected = activeSubTab == tabName
+                        Surface(
+                            modifier = Modifier.clickable { activeSubTab = tabName },
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isSelected) Color(0xFFF3F4F6) else Color.Transparent,
+                        ) {
+                            Text(
+                                text = tabName,
+                                fontSize = 13.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isSelected) Color.Black else Color(0xFF6B7280),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                if (!loading && activeSubTab == "Imported" && hasFiles) {
                     IconButton(onClick = onExport, modifier = Modifier.size(36.dp)) {
                         Icon(
                             painterResource(R.drawable.ic_custom_download),
@@ -5573,7 +5717,7 @@ private fun FilesTab(
                     IconButton(onClick = onRefresh, modifier = Modifier.size(36.dp)) {
                         Icon(
                             painterResource(R.drawable.ic_custom_refresh),
-                            "Refresh files",
+                            if (activeSubTab == "Root") "Refresh workspace files" else "Refresh files",
                             modifier = Modifier.size(18.dp),
                         )
                     }
@@ -5581,139 +5725,379 @@ private fun FilesTab(
             }
             Spacer(Modifier.height(12.dp))
         }
-        if (suggestedProjectRoot != null) {
-            item(key = "suggested-project-root") {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Project folder detected", fontWeight = FontWeight.Bold)
-                        Text(
-                            "Use $suggestedProjectRoot as the project root so Chat, Terminal, Changes, and Preview all run from the same folder.",
-                            fontSize = 13.sp,
-                        )
-                        Button(onClick = onUseSuggestedProjectRoot, modifier = Modifier.fillMaxWidth()) {
-                            Text("Use $suggestedProjectRoot as project root")
+
+        if (activeSubTab == "Imported") {
+            if (suggestedProjectRoot != null) {
+                item(key = "suggested-project-root") {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Project folder detected", fontWeight = FontWeight.Bold)
+                            Text(
+                                "Use $suggestedProjectRoot as the project root so Chat, Terminal, Changes, and Preview all run from the same folder.",
+                                fontSize = 13.sp,
+                            )
+                            Button(onClick = onUseSuggestedProjectRoot, modifier = Modifier.fillMaxWidth()) {
+                                Text("Use $suggestedProjectRoot as project root")
+                            }
                         }
                     }
                 }
             }
-        }
-        if (!loading && files.isEmpty() && !isVersionInProgress) {
-            item { EmptyState(Icons.Default.Folder, "No files yet", "Ask your coding agent to create something in this project.") }
-        }
+            if (!loading && files.isEmpty() && !isVersionInProgress) {
+                item { EmptyState(Icons.Default.Folder, "No files yet", "Ask your coding agent to create something in this project.") }
+            }
 
-        if (isVersionInProgress) {
-            item(key = "in-progress-version-shimmer") {
-                VersionShimmerPlaceholderCard(
-                    projectSlug = projectSlug,
-                    versionTag = inProgressVersionTag ?: "Next version",
+            if (isVersionInProgress) {
+                item(key = "in-progress-version-shimmer") {
+                    VersionShimmerPlaceholderCard(
+                        projectSlug = projectSlug,
+                        versionTag = inProgressVersionTag ?: "Next version",
+                    )
+                }
+            }
+
+            if (projectVersions.isNotEmpty()) {
+                val sortedVersions = projectVersions.sortedByDescending { it.versionNumber }
+                items(sortedVersions, key = { "version-${it.versionNumber}" }) { version ->
+                    val count = if (version.filesCount > 0) version.filesCount else files.count { !it.isDirectory }
+                    val fileLabel = if (count == 1) "1 file" else "$count files"
+                    val versionTag = version.versionTag.lowercase()
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenVersionZip(version, "${projectSlug}.zip") },
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.White,
+                        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                        shadowElevation = 0.dp,
+                        tonalElevation = 0.dp,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            SquareZipIcon(
+                                modifier = Modifier.size(22.dp),
+                                tint = Color.Black,
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = "${projectSlug}.zip",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.Black,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color.Black,
+                            ) {
+                                Text(
+                                    text = fileLabel,
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color.White,
+                                border = BorderStroke(1.dp, Color(0xFFD1D5DB)),
+                            ) {
+                                Text(
+                                    text = versionTag,
+                                    color = Color.Black,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "Open zip contents",
+                                modifier = Modifier.size(18.dp),
+                                tint = Color(0xFF9CA3AF),
+                            )
+                        }
+                    }
+                }
+            } else if (hasFiles) {
+                item(key = "project-zip-card") {
+                    val count = files.count { !it.isDirectory }
+                    val fileLabel = if (count == 1) "1 file" else "$count files"
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenZip("${projectSlug}.zip") },
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.White,
+                        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                        shadowElevation = 0.dp,
+                        tonalElevation = 0.dp,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            SquareZipIcon(
+                                modifier = Modifier.size(22.dp),
+                                tint = Color.Black,
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = "${projectSlug}.zip",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.Black,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color.Black,
+                            ) {
+                                Text(
+                                    text = fileLabel,
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color.White,
+                                border = BorderStroke(1.dp, Color(0xFFD1D5DB)),
+                            ) {
+                                Text(
+                                    text = zipVersionLabel,
+                                    color = Color.Black,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "Open zip contents",
+                                modifier = Modifier.size(18.dp),
+                                tint = Color(0xFF9CA3AF),
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // Root tab: render files: List<WorkspaceEntry> as plain rows
+            if (!loading && files.isEmpty()) {
+                item { EmptyState(Icons.Default.Folder, "No files in root", "Workspace root is empty.") }
+            } else {
+                val visibleRootFiles = remember(files, collapsedFolders) {
+                    files.filter { entry ->
+                        val parts = entry.path.split('/')
+                        if (parts.size <= 1) {
+                            true
+                        } else {
+                            var hidden = false
+                            var cur = ""
+                            for (i in 0 until parts.size - 1) {
+                                cur = if (cur.isEmpty()) parts[i] else "$cur/${parts[i]}"
+                                if (collapsedFolders.contains(cur)) {
+                                    hidden = true
+                                    break
+                                }
+                            }
+                            !hidden
+                        }
+                    }
+                }
+                items(visibleRootFiles, key = { "root-${it.path}" }) { entry ->
+                    val isCollapsed = collapsedFolders.contains(entry.path)
+                    RootWorkspaceFileRow(
+                        entry = entry,
+                        isCollapsed = isCollapsed,
+                        onToggleFolder = {
+                            collapsedFolders = if (collapsedFolders.contains(entry.path)) {
+                                collapsedFolders - entry.path
+                            } else {
+                                collapsedFolders + entry.path
+                            }
+                        },
+                        onOpenFile = { onOpenFile(entry) },
+                        onDownloadFile = { onDownloadFile(entry) },
+                        onRenameFile = onRenameFile,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RootWorkspaceFileRow(
+    entry: WorkspaceEntry,
+    isCollapsed: Boolean,
+    onToggleFolder: () -> Unit,
+    onOpenFile: () -> Unit,
+    onDownloadFile: () -> Unit,
+    onRenameFile: (String, String) -> Unit,
+) {
+    val fileRoot = LocalAttachmentRoot.current
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameText by remember(entry.name) { mutableStateOf(entry.name) }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                if (entry.isDirectory) {
+                    onToggleFolder()
+                } else {
+                    onOpenFile()
+                }
+            },
+        shape = RoundedCornerShape(8.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start = (14 + entry.depth * 10).coerceAtMost(38).dp,
+                    end = 14.dp,
+                    top = 10.dp,
+                    bottom = 10.dp,
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FileTypeIcon(
+                name = entry.name,
+                isDirectory = entry.isDirectory,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = entry.name,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val subtitle = if (entry.isDirectory) {
+                    entry.path
+                } else if (entry.sizeBytes > 0) {
+                    "${entry.path} · ${formatFileSize(entry.sizeBytes)}"
+                } else {
+                    entry.path
+                }
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = Color(0xFF6B7280),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (entry.isDirectory) {
+                IconButton(
+                    onClick = onToggleFolder,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = if (isCollapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isCollapsed) "Expand folder" else "Collapse folder",
+                        modifier = Modifier.size(18.dp),
+                        tint = Color(0xFF9CA3AF),
+                    )
+                }
+            } else {
+                FileActionsMenu(
+                    onCopy = {
+                        scope.launch {
+                            val text = withContext(Dispatchers.IO) {
+                                resolveWorkspaceFile(fileRoot, entry.path, context)?.readText(Charsets.UTF_8)
+                            }
+                            if (text != null) {
+                                clipboard.setText(AnnotatedString(text))
+                                Toast.makeText(context, "Copied ${entry.name}", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Couldn't read ${entry.name}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onDownload = onDownloadFile,
+                    onShare = {
+                        scope.launch {
+                            val file = withContext(Dispatchers.IO) { resolveWorkspaceFile(fileRoot, entry.path, context) }
+                            if (file != null) {
+                                context.startActivity(Intent.createChooser(shareFileIntent(context, file), "Share ${entry.name}"))
+                            } else {
+                                Toast.makeText(context, "Couldn't read ${entry.name}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onRename = {
+                        renameText = entry.name
+                        showRenameDialog = true
+                    },
                 )
             }
         }
+    }
 
-        if (projectVersions.isNotEmpty()) {
-            val sortedVersions = projectVersions.sortedByDescending { it.versionNumber }
-            items(sortedVersions, key = { "version-${it.versionNumber}" }) { version ->
-                val count = if (version.filesCount > 0) version.filesCount else files.count { !it.isDirectory }
-                val fileLabel = if (count == 1) "1 file" else "$count files"
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenVersionZip(version, "${projectSlug}.zip") },
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
-                    shadowElevation = 0.dp,
-                    tonalElevation = 0.dp,
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_custom_zip),
-                            contentDescription = null,
-                            modifier = Modifier.size(22.dp),
-                            tint = Color.Black,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = "${projectSlug}.zip",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color.Black,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = "$fileLabel · ${version.versionTag.lowercase()}",
-                                fontSize = 12.sp,
-                                color = Color(0xFF6B7280),
-                            )
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("Rename file") },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    label = { Text("File name") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(4.dp),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val trimmed = renameText.trim()
+                        if (trimmed.isNotEmpty() && trimmed != entry.name) {
+                            onRenameFile(entry.path, trimmed)
                         }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = "Open zip contents",
-                            modifier = Modifier.size(18.dp),
-                            tint = Color(0xFF9CA3AF),
-                        )
-                    }
-                }
-            }
-        } else if (hasFiles) {
-            item(key = "project-zip-card") {
-                val count = files.count { !it.isDirectory }
-                val fileLabel = if (count == 1) "1 file" else "$count files"
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenZip("${projectSlug}.zip") },
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
-                    shadowElevation = 0.dp,
-                    tonalElevation = 0.dp,
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_custom_zip),
-                            contentDescription = null,
-                            modifier = Modifier.size(22.dp),
-                            tint = Color.Black,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = "${projectSlug}.zip",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color.Black,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = "$fileLabel · $zipVersionLabel",
-                                fontSize = 12.sp,
-                                color = Color(0xFF6B7280),
-                            )
-                        }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = "Open zip contents",
-                            modifier = Modifier.size(18.dp),
-                            tint = Color(0xFF9CA3AF),
-                        )
-                    }
-                }
-            }
-        }
+                        showRenameDialog = false
+                    },
+                    enabled = renameText.isNotBlank(),
+                    shape = RoundedCornerShape(4.dp),
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }, shape = RoundedCornerShape(4.dp)) { Text("Cancel") }
+            },
+            shape = RoundedCornerShape(4.dp),
+        )
     }
 }
 
@@ -6349,7 +6733,7 @@ private fun ChatTab(
                                     promptValue = inputVal
                                 }
                             } else {
-                                val isVeryLong = input.length > 15_000
+                                val isVeryLong = input.length > 2_000
                                 if (isVeryLong && pendingAttachments.size < MainViewModel.MAX_ATTACHMENTS_PER_MESSAGE) {
                                     val chunk = if (prompt.isNotBlank() && input.startsWith(prompt)) {
                                         input.substring(prompt.length).trim()
@@ -6358,7 +6742,7 @@ private fun ChatTab(
                                     } else {
                                         input.trim()
                                     }
-                                    if (chunk.length > 15_000) {
+                                    if (chunk.length > 2_000) {
                                         onAddTextAttachment(chunk)
                                         promptValue = if (prompt.isNotBlank() && (input.startsWith(prompt) || input.endsWith(prompt))) promptValue else TextFieldValue("")
                                         Toast.makeText(context, "Converted long text to attachment", Toast.LENGTH_SHORT).show()
@@ -6387,7 +6771,7 @@ private fun ChatTab(
                                 } else if (transferable.hasMediaType(MediaType.Text)) {
                                     val clipData = transferable.clipEntry.clipData
                                     val text = (0 until clipData.itemCount).mapNotNull { clipData.getItemAt(it).text?.toString() }.joinToString("\n")
-                                    if (text.length > 15_000 && pendingAttachments.size < MainViewModel.MAX_ATTACHMENTS_PER_MESSAGE) {
+                                    if (text.length > 2_000 && pendingAttachments.size < MainViewModel.MAX_ATTACHMENTS_PER_MESSAGE) {
                                         onAddTextAttachment(text)
                                         Toast.makeText(context, "Converted long text to attachment", Toast.LENGTH_SHORT).show()
                                         transferable.consume { true }
