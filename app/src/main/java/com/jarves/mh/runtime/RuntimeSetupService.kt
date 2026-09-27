@@ -4,348 +4,208 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.jarves.mh.MainActivity
 import com.jarves.mh.R
-import com.jarves.mh.data.AppPreferences
-import com.jarves.mh.model.DevStack
-import java.io.File
-import java.net.UnknownHostException
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import org.json.JSONArray
-import org.json.JSONObject
 
-enum class RuntimeSetupStatus { IDLE, RUNNING, COMPLETE, ERROR, CANCELLED }
+internal object RuntimeTaskController {
+    @Volatile var stopAction: (() -> Unit)? = null
 
-data class RuntimeSetupSnapshot(
-    val status: RuntimeSetupStatus = RuntimeSetupStatus.IDLE,
-    val message: String = "Preparing your private coding workspace",
-    val progress: Float = 0f,
-    val downloadedBytes: Long? = null,
-    val totalBytes: Long? = null,
-    val indeterminate: Boolean = false,
-    val logs: List<String> = emptyList(),
-    val errorMessage: String? = null,
-    val offline: Boolean = false,
-)
-
-object RuntimeSetupController {
-    private val mutableSnapshot = MutableStateFlow(RuntimeSetupSnapshot())
-    val snapshot: StateFlow<RuntimeSetupSnapshot> = mutableSnapshot.asStateFlow()
-
-    @Synchronized
-    fun restore(context: Context) {
-        val file = stateFile(context)
-        if (!file.isFile) return
-        runCatching {
-            val json = JSONObject(file.readText())
-            val logsJson = json.optJSONArray("logs") ?: JSONArray()
-            val logs = (0 until logsJson.length()).map { logsJson.optString(it) }
-            mutableSnapshot.value = RuntimeSetupSnapshot(
-                status = runCatching { RuntimeSetupStatus.valueOf(json.optString("status")) }
-                    .getOrDefault(RuntimeSetupStatus.IDLE),
-                message = json.optString("message", "Preparing your private coding workspace"),
-                progress = json.optDouble("progress", 0.0).toFloat(),
-                downloadedBytes = json.optLongOrNull("downloadedBytes"),
-                totalBytes = json.optLongOrNull("totalBytes"),
-                indeterminate = json.optBoolean("indeterminate"),
-                logs = logs.takeLast(MAX_LOG_LINES),
-                errorMessage = json.optString("errorMessage").takeIf(String::isNotBlank),
-                offline = json.optBoolean("offline"),
-            )
-        }
+    fun requestStop() {
+        stopAction?.invoke()
     }
-
-    @Synchronized
-    fun begin(context: Context) {
-        val previous = mutableSnapshot.value.logs
-        val logs = (previous + "— Resuming Rlaude Harness setup —").takeLast(MAX_LOG_LINES)
-        set(context, RuntimeSetupSnapshot(status = RuntimeSetupStatus.RUNNING, progress = 0.01f, logs = logs))
-    }
-
-    @Synchronized
-    fun update(context: Context, event: RuntimeInstallProgress) {
-        val current = mutableSnapshot.value
-        val line = event.terminalLine ?: when {
-            event.downloadedBytes != null && event.totalBytes != null ->
-                "Downloading: %.1f / %.1f MB".format(event.downloadedBytes / MB, event.totalBytes / MB)
-            event.event == RuntimeInstallEvent.STAGE -> "• ${event.message}"
-            else -> null
-        }
-        val sanitizedLine = line?.takeIf(String::isNotBlank)?.let(::sanitize)
-        val isDownloadUpdate = event.downloadedBytes != null && event.totalBytes != null
-        val logs = when {
-            sanitizedLine == null -> current.logs
-            isDownloadUpdate && current.logs.lastOrNull()?.startsWith(DOWNLOAD_PREFIX) == true ->
-                (current.logs.dropLast(1) + sanitizedLine).takeLast(MAX_LOG_LINES)
-            else -> (current.logs + sanitizedLine).takeLast(MAX_LOG_LINES)
-        }
-        // Persist the beginning of a transfer as a checkpoint, while the JSON snapshot
-        // continuously replaces that row with the newest byte count.
-        if (!isDownloadUpdate || current.logs.lastOrNull()?.startsWith(DOWNLOAD_PREFIX) != true) {
-            appendLog(context, sanitizedLine)
-        }
-        set(
-            context,
-            current.copy(
-                status = RuntimeSetupStatus.RUNNING,
-                // Raw command output changes length constantly. Keep the headline stage
-                // stable and show changing lines only in the live terminal panel.
-                message = when (event.event) {
-                    RuntimeInstallEvent.STAGE, RuntimeInstallEvent.DOWNLOAD -> event.message
-                    else -> current.message
-                },
-                progress = maxOf(current.progress, event.fraction.coerceIn(0f, 1f)),
-                downloadedBytes = event.downloadedBytes,
-                totalBytes = event.totalBytes,
-                indeterminate = event.indeterminate,
-                logs = logs,
-                errorMessage = null,
-                offline = false,
-            ),
-        )
-    }
-
-    @Synchronized
-    fun complete(context: Context) {
-        val current = mutableSnapshot.value
-        set(
-            context,
-            current.copy(
-                status = RuntimeSetupStatus.COMPLETE,
-                message = "Rlaude Harness is ready",
-                progress = 1f,
-                indeterminate = false,
-                downloadedBytes = null,
-                totalBytes = null,
-                logs = (current.logs + "✓ Setup completed successfully").takeLast(MAX_LOG_LINES),
-            ),
-        )
-    }
-
-    @Synchronized
-    fun fail(context: Context, error: Throwable) {
-        val causes = generateSequence(error as Throwable?) { it.cause }.toList()
-        val offline = causes.any {
-            it is UnknownHostException ||
-                it.message.orEmpty().contains("unable to resolve host", true) ||
-                it.message.orEmpty().contains("no address associated with hostname", true)
-        }
-        val interruptedDpkg = causes.any {
-            it.message.orEmpty().contains("dpkg was interrupted", true) ||
-                it.message.orEmpty().contains("dpkg --configure -a", true)
-        }
-        val friendly = when {
-            offline -> "Connect to Wi-Fi or mobile data, then resume setup."
-            interruptedDpkg -> "Android interrupted Linux setup. Rlaude Harness will repair it when you try again."
-            else -> error.message.orEmpty().lineSequence().lastOrNull { it.isNotBlank() }
-                ?.take(220)
-                ?: "Rlaude Harness could not finish setup."
-        }
-        val current = mutableSnapshot.value
-        set(
-            context,
-            current.copy(
-                status = RuntimeSetupStatus.ERROR,
-                errorMessage = friendly,
-                offline = offline,
-                indeterminate = false,
-                logs = (current.logs + "✕ $friendly").takeLast(MAX_LOG_LINES),
-            ),
-        )
-    }
-
-    @Synchronized
-    fun cancelled(context: Context) {
-        val current = mutableSnapshot.value
-        set(
-            context,
-            current.copy(
-                status = RuntimeSetupStatus.CANCELLED,
-                message = "Setup paused",
-                indeterminate = false,
-                logs = (current.logs + "• Setup paused safely").takeLast(MAX_LOG_LINES),
-            ),
-        )
-    }
-
-    fun fullLog(context: Context): String = logFile(context).takeIf(File::isFile)?.readText().orEmpty()
-
-    private fun set(context: Context, value: RuntimeSetupSnapshot) {
-        mutableSnapshot.value = value
-        persist(context, value)
-    }
-
-    private fun persist(context: Context, value: RuntimeSetupSnapshot) {
-        val json = JSONObject()
-            .put("status", value.status.name)
-            .put("message", value.message)
-            .put("progress", value.progress)
-            .put("indeterminate", value.indeterminate)
-            .put("offline", value.offline)
-            .put("logs", JSONArray(value.logs))
-        value.downloadedBytes?.let { json.put("downloadedBytes", it) }
-        value.totalBytes?.let { json.put("totalBytes", it) }
-        value.errorMessage?.let { json.put("errorMessage", it) }
-        val target = stateFile(context)
-        val staged = File(target.parentFile, "${target.name}.tmp")
-        staged.writeText(json.toString())
-        target.delete()
-        staged.renameTo(target)
-    }
-
-    private fun appendLog(context: Context, line: String?) {
-        if (line.isNullOrBlank()) return
-        val file = logFile(context)
-        file.parentFile?.mkdirs()
-        file.appendText(sanitize(line) + "\n")
-        if (file.length() > MAX_LOG_BYTES) {
-            val tail = file.readText().takeLast(MAX_LOG_BYTES.toInt())
-            file.writeText(tail.substringAfter('\n', tail))
-        }
-    }
-
-    private fun sanitize(line: String): String = line.filter { it == '\t' || it.code >= 32 }.take(500)
-    private fun stateFile(context: Context) = File(context.filesDir, "setup/runtime-setup-state.json").apply { parentFile?.mkdirs() }
-    private fun logFile(context: Context) = File(context.filesDir, "setup/runtime-setup.log")
-    private fun JSONObject.optLongOrNull(name: String): Long? = if (has(name) && !isNull(name)) optLong(name) else null
-
-    private const val MAX_LOG_LINES = 400
-    private const val MAX_LOG_BYTES = 1_000_000L
-    private const val MB = 1_048_576.0
-    private const val DOWNLOAD_PREFIX = "Downloading:"
 }
 
-class RuntimeSetupService : Service() {
-    private val serviceJob = SupervisorJob()
-    private val scope = CoroutineScope(serviceJob + Dispatchers.IO)
-    private var installJob: Job? = null
+class RuntimeExecutionService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
-    private var lastNotificationAt = 0L
+    private var projectName: String = "your project"
+    private var notificationTitle: String = "Coding agent is working"
+    private var canStop: Boolean = true
+    private var taskRunning: Boolean = false
+    private var isForeground: Boolean = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
         super.onCreate()
-        ensureNotificationChannel(this)
-        RuntimeSetupController.restore(this)
+        ensureNotificationChannels(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            installJob?.cancel(CancellationException("Stopped by user"))
-            RuntimeSetupController.cancelled(this)
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        startForeground(NOTIFICATION_ID, setupNotification(RuntimeSetupController.snapshot.value))
-        acquireWakeLock()
-        if (installJob?.isActive != true) {
-            val stacks = intent?.getStringExtra(EXTRA_STACKS).orEmpty().split(',')
-                .mapNotNull { name -> runCatching { DevStack.valueOf(name) }.getOrNull() }
-                .toSet()
-            val agent = runCatching {
-                com.jarves.mh.model.AgentKind.valueOf(intent?.getStringExtra(EXTRA_AGENT).orEmpty())
-            }.getOrDefault(com.jarves.mh.model.AgentKind.CLAUDE_CODE)
-            RuntimeSetupController.begin(this)
-            installJob = scope.launch {
-                try {
-                    RuntimeInstaller(this@RuntimeSetupService).ensureInstalled(stacks, agent) { progress ->
-                        RuntimeSetupController.update(this@RuntimeSetupService, progress)
-                        updateNotification(progress.event == RuntimeInstallEvent.COMMAND_COMPLETED)
-                    }
-                    AppPreferences(this@RuntimeSetupService).runtimeSetupComplete = true
-                    RuntimeSetupController.complete(this@RuntimeSetupService)
-                    showFinishedNotification(success = true)
-                } catch (_: CancellationException) {
-                    RuntimeSetupController.cancelled(this@RuntimeSetupService)
-                } catch (error: Throwable) {
-                    RuntimeSetupController.fail(this@RuntimeSetupService, error)
-                    showFinishedNotification(success = false)
-                } finally {
-                    releaseWakeLock()
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
-                }
+        // MUST be the very first thing this method does, before touching intent extras or
+        // anything else: the OS starts its "did you call startForeground() in time?" watchdog
+        // the instant startForegroundService() was invoked on the caller side, so every extra
+        // line of work here before promoting to foreground eats into that budget.
+        // justPromoted tracks whether *this* onStartCommand call is the one that performed the
+        // promotion, so a task that finishes almost instantly (ACTION_COMPLETE/FAILED/CANCELLED
+        // arriving in the very same delivery, or a fast-failing task queued right behind START)
+        // doesn't call stopForeground()/stopSelf() before the platform has fully registered the
+        // service as foreground — a known source of a *spurious*
+        // ForegroundServiceDidNotStartInTimeException even though startForeground() itself
+        // returned successfully.
+        var justPromoted = false
+        if (!isForeground) {
+            try {
+                startForeground(
+                    RUNNING_NOTIFICATION_ID,
+                    runningNotification("$notificationTitle in $projectName", includeStop = canStop),
+                )
+                isForeground = true
+                justPromoted = true
+            } catch (t: Throwable) {
+                // We could not become a real foreground service. Swallowing this silently is
+                // exactly what previously let the process limp along and then get killed by the
+                // watchdog anyway (with no clue why). Log it and stop cleanly instead — there is
+                // nothing useful we can do without foreground status.
+                Log.e(TAG, "startForeground() failed; stopping service", t)
+                stopSelf(startId)
+                return START_NOT_STICKY
             }
         }
-        return START_REDELIVER_INTENT
+
+        intent?.getStringExtra(EXTRA_PROJECT_NAME)?.takeIf(String::isNotBlank)?.let { projectName = it }
+        intent?.getStringExtra(EXTRA_TITLE)?.takeIf(String::isNotBlank)?.let { notificationTitle = it }
+        if (intent?.hasExtra(EXTRA_CAN_STOP) == true) canStop = intent.getBooleanExtra(EXTRA_CAN_STOP, true)
+
+        // Now that project/title extras are known, refresh the notification we posted above with
+        // the real text (it may have been posted with stale/default values a moment ago).
+        if (justPromoted) {
+            getSystemService(NotificationManager::class.java).notify(
+                RUNNING_NOTIFICATION_ID,
+                runningNotification(
+                    intent?.getStringExtra(EXTRA_DETAIL)?.takeIf { it.isNotBlank() }
+                        ?: "$notificationTitle in $projectName",
+                    includeStop = canStop,
+                ),
+            )
+        }
+
+        when (intent?.action ?: ACTION_START) {
+            ACTION_STOP -> {
+                RuntimeTaskController.requestStop()
+                getSystemService(NotificationManager::class.java).notify(
+                    RUNNING_NOTIFICATION_ID,
+                    runningNotification("Stopping safely…", includeStop = false),
+                )
+            }
+            ACTION_PROGRESS -> {
+                // Live step updates only matter while a task is actually running.
+                if (!taskRunning) return START_NOT_STICKY
+                val detail = intent?.getStringExtra(EXTRA_DETAIL)?.takeIf { it.isNotBlank() }
+                    ?: "$notificationTitle in $projectName"
+                getSystemService(NotificationManager::class.java).notify(
+                    RUNNING_NOTIFICATION_ID,
+                    runningNotification(detail, includeStop = canStop),
+                )
+            }
+            ACTION_COMPLETE -> finishTask(
+                title = "Task completed",
+                detail = intent?.getStringExtra(EXTRA_DETAIL) ?: "Finished working in $projectName.",
+                failed = false,
+                justPromoted = justPromoted,
+            )
+            ACTION_FAILED -> finishTask(
+                title = "Task needs attention",
+                detail = intent?.getStringExtra(EXTRA_DETAIL) ?: "Could not finish the task in $projectName.",
+                failed = true,
+                justPromoted = justPromoted,
+            )
+            ACTION_CANCELLED -> stopRuntime(justPromoted)
+            else -> {
+                taskRunning = true
+                acquireWakeLock()
+            }
+        }
+        return START_NOT_STICKY
     }
 
-    private fun updateNotification(force: Boolean = false) {
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (!force && now - lastNotificationAt < NOTIFICATION_THROTTLE_MS) return
-        lastNotificationAt = now
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, setupNotification(RuntimeSetupController.snapshot.value))
-    }
-
-    private fun setupNotification(state: RuntimeSetupSnapshot): android.app.Notification {
-        val latest = state.logs.lastOrNull().orEmpty().take(180)
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun runningNotification(detail: String, includeStop: Boolean): android.app.Notification {
+        val builder = NotificationCompat.Builder(this, RUNNING_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Setting up Rlaude Harness")
-            .setContentText(latest.ifBlank { state.message })
-            .setStyle(NotificationCompat.BigTextStyle().bigText(latest.ifBlank { state.message }))
+            .setContentTitle(notificationTitle)
+            .setContentText(detail)
             .setContentIntent(openAppIntent())
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
-            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-        if (state.indeterminate) builder.setProgress(0, 0, true)
-        else builder.setProgress(100, (state.progress * 100).toInt().coerceIn(0, 100), false)
-        builder.addAction(
-            0,
-            "Stop setup",
-            PendingIntent.getService(
+        if (includeStop) {
+            val stopIntent = PendingIntent.getService(
                 this,
-                102,
-                Intent(this, RuntimeSetupService::class.java).setAction(ACTION_STOP),
+                2,
+                Intent(this, RuntimeExecutionService::class.java).setAction(ACTION_STOP),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            ),
-        )
+            )
+            builder.addAction(0, "Stop task", stopIntent)
+        }
         return builder.build()
     }
 
-    private fun showFinishedNotification(success: Boolean) {
-        val state = RuntimeSetupController.snapshot.value
-        val title = if (success) "Rlaude Harness is ready" else "Setup needs attention"
-        val detail = if (success) "Your private coding workspace is ready." else state.errorMessage.orEmpty()
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun finishTask(title: String, detail: String, failed: Boolean, justPromoted: Boolean) {
+        taskRunning = false
+        val notification = NotificationCompat.Builder(this, RESULT_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(detail)
             .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
             .setContentIntent(openAppIntent())
             .setAutoCancel(true)
+            .setCategory(if (failed) NotificationCompat.CATEGORY_ERROR else NotificationCompat.CATEGORY_STATUS)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
-        getSystemService(NotificationManager::class.java).notify(RESULT_NOTIFICATION_ID, notification)
+        stopRuntimeAndPost(justPromoted) {
+            getSystemService(NotificationManager::class.java).notify(RESULT_NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun stopRuntime(justPromoted: Boolean) {
+        taskRunning = false
+        stopRuntimeAndPost(justPromoted, onStopped = null)
+    }
+
+    /**
+     * Tears the service down (stopForeground + stopSelf), optionally running [onStopped] right
+     * before stopSelf(). If [justPromoted] is true — meaning this very onStartCommand delivery is
+     * the one that just called startForeground() — the actual teardown is pushed a beat onto the
+     * main looper instead of happening inline. On several OEM builds, calling stopForeground()/
+     * stopSelf() in the same event-loop pass as startForeground() races the platform's internal
+     * bookkeeping and can still surface as ForegroundServiceDidNotStartInTimeException, even
+     * though startForeground() itself succeeded. A short post-to-main gives the system time to
+     * finish registering the service as foreground first.
+     */
+    private fun stopRuntimeAndPost(justPromoted: Boolean, onStopped: (() -> Unit)?) {
+        val teardown = {
+            releaseWakeLock()
+            onStopped?.invoke()
+            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+            isForeground = false
+            stopSelf()
+        }
+        if (justPromoted) {
+            mainHandler.postDelayed(teardown, FAST_FINISH_GUARD_MS)
+        } else {
+            teardown()
+        }
     }
 
     private fun openAppIntent(): PendingIntent = PendingIntent.getActivity(
         this,
-        101,
-        Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP },
+        1,
+        Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        },
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
         wakeLock = getSystemService(PowerManager::class.java)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.jarves.mh:runtime-setup")
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.jarves.mh:active-coding-task")
             .apply { acquire(MAX_WAKE_LOCK_MS) }
     }
 
@@ -355,28 +215,43 @@ class RuntimeSetupService : Service() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null)
         releaseWakeLock()
-        scope.cancel()
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        const val ACTION_START = "com.jarves.mh.START_SETUP"
-        const val ACTION_STOP = "com.jarves.mh.STOP_SETUP"
-        const val EXTRA_STACKS = "selected_stacks"
-        const val EXTRA_AGENT = "selected_agent"
-        private const val CHANNEL_ID = "runtime-setup"
-        private const val NOTIFICATION_ID = 51
-        private const val RESULT_NOTIFICATION_ID = 52
-        private const val NOTIFICATION_THROTTLE_MS = 750L
-        private const val MAX_WAKE_LOCK_MS = 45 * 60 * 1_000L
+        const val ACTION_START = "com.jarves.mh.START_RUNTIME"
+        const val ACTION_STOP = "com.jarves.mh.STOP_RUNTIME"
+        const val ACTION_PROGRESS = "com.jarves.mh.PROGRESS_RUNTIME"
+        const val ACTION_COMPLETE = "com.jarves.mh.COMPLETE_RUNTIME"
+        const val ACTION_FAILED = "com.jarves.mh.FAIL_RUNTIME"
+        const val ACTION_CANCELLED = "com.jarves.mh.CANCEL_RUNTIME"
+        const val EXTRA_PROJECT_NAME = "project_name"
+        const val EXTRA_DETAIL = "detail"
+        const val EXTRA_TITLE = "title"
+        const val EXTRA_CAN_STOP = "can_stop"
 
-        fun ensureNotificationChannel(context: Context) {
-            context.getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Rlaude Harness setup", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "Shows download and installation progress for the private coding environment"
+        private const val RUNNING_CHANNEL_ID = "runtime"
+        private const val RESULT_CHANNEL_ID = "task-results"
+        private const val RUNNING_NOTIFICATION_ID = 41
+        private const val RESULT_NOTIFICATION_ID = 42
+        private const val MAX_WAKE_LOCK_MS = 90 * 60 * 1_000L
+        private const val FAST_FINISH_GUARD_MS = 300L
+        private const val TAG = "RuntimeExecutionSvc"
+
+        fun ensureNotificationChannels(context: android.content.Context) {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(
+                NotificationChannel(RUNNING_CHANNEL_ID, "Running coding tasks", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "Shows progress while coding agent is working in the background"
+                },
+            )
+            manager.createNotificationChannel(
+                NotificationChannel(RESULT_CHANNEL_ID, "Task results", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = "Notifies you when a coding task finishes or needs attention"
                 },
             )
         }
