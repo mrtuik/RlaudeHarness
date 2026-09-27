@@ -3659,21 +3659,26 @@ private fun ProjectsScreen(
             }
         }
         val isImportExpanded = importExpanded || state.projectImporting || state.gitCloneRunning
-        AnimatedVisibility(
-            visible = isImportExpanded,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
+        if (isImportExpanded) {
+            ModalBottomSheet(
+                onDismissRequest = {
+                    if (!state.projectImporting && !state.gitCloneRunning) {
+                        onImportExpandedChange(false)
+                    }
+                },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = Color.White,
+                tonalElevation = 0.dp,
+                scrimColor = Color.Black.copy(alpha = 0.32f),
+                dragHandle = null,
                 shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-                color = Color.White,
-                shadowElevation = 0.dp,
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
             ) {
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp).padding(bottom = 64.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(16.dp)
+                        .padding(bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Row(
@@ -4885,10 +4890,13 @@ private fun FileViewerScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(fileName, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(filePath, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+                    Text(
+                        text = fileName,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close file") }
@@ -5348,6 +5356,21 @@ private fun FileTypeIcon(
     }
 }
 
+private data class ArchiveTreeNode(
+    val name: String,
+    val path: String,
+    val isDirectory: Boolean,
+    val depth: Int,
+    val entry: WorkspaceEntry? = null,
+    val children: MutableList<ArchiveTreeNode> = mutableListOf(),
+)
+
+private data class VisibleTreeItem(
+    val node: ArchiveTreeNode,
+    val depth: Int,
+    val guideLineLevels: List<Int>,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ZipContentsScreen(
@@ -5359,50 +5382,63 @@ private fun ZipContentsScreen(
     onDownloadFile: (WorkspaceEntry) -> Unit,
     onRenameZip: ((String) -> Unit)? = null,
 ) {
-    var currentPath by rememberSaveable(zipName) { mutableStateOf("") }
-    val canGoUp = currentPath.isNotEmpty()
-    val onNavigateUp = {
-        if (currentPath.contains('/')) {
-            currentPath = currentPath.substringBeforeLast('/')
-        } else {
-            currentPath = ""
-        }
-    }
-
     BackHandler(enabled = true) {
-        if (canGoUp) {
-            onNavigateUp()
-        } else {
-            onBack()
-        }
+        onBack()
     }
 
-    val prefix = if (currentPath.isEmpty()) "" else "$currentPath/"
-
-    val subfolders = remember(files, currentPath) {
-        val folderNames = mutableSetOf<String>()
+    val rootTreeNodes = remember(files) {
+        val rootChildren = mutableListOf<ArchiveTreeNode>()
         files.forEach { entry ->
-            val rel = if (currentPath.isEmpty()) entry.path else if (entry.path.startsWith(prefix)) entry.path.removePrefix(prefix) else null
-            if (rel != null && rel.isNotEmpty()) {
-                if (rel.contains('/')) {
-                    folderNames.add(rel.substringBefore('/'))
-                } else if (entry.isDirectory) {
-                    folderNames.add(rel)
+            val cleanPath = entry.path.trim('/')
+            if (cleanPath.isEmpty()) return@forEach
+            val parts = cleanPath.split('/')
+            var currentChildren = rootChildren
+            var accumulatedPath = ""
+            for (i in parts.indices) {
+                val part = parts[i]
+                val isLast = (i == parts.size - 1)
+                accumulatedPath = if (accumulatedPath.isEmpty()) part else "$accumulatedPath/$part"
+                val isDir = if (isLast) entry.isDirectory else true
+                var found = currentChildren.find { it.name == part && it.isDirectory == isDir }
+                if (found == null) {
+                    found = ArchiveTreeNode(
+                        name = part,
+                        path = accumulatedPath,
+                        isDirectory = isDir,
+                        depth = i,
+                        entry = if (isLast) entry else null,
+                    )
+                    currentChildren.add(found)
+                }
+                currentChildren = found.children
+            }
+        }
+        fun sortNodes(nodes: MutableList<ArchiveTreeNode>) {
+            nodes.sortWith(
+                compareByDescending<ArchiveTreeNode> { it.isDirectory }
+                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name }
+            )
+            nodes.forEach { if (it.isDirectory) sortNodes(it.children) }
+        }
+        sortNodes(rootChildren)
+        rootChildren
+    }
+
+    // Folders start collapsed by default
+    var expandedFolders by rememberSaveable(zipName) { mutableStateOf(setOf<String>()) }
+
+    val visibleTreeItems = remember(rootTreeNodes, expandedFolders) {
+        val result = mutableListOf<VisibleTreeItem>()
+        fun traverse(nodes: List<ArchiveTreeNode>, currentGuideLevels: List<Int>) {
+            for (node in nodes) {
+                result.add(VisibleTreeItem(node, node.depth, currentGuideLevels))
+                if (node.isDirectory && expandedFolders.contains(node.path)) {
+                    traverse(node.children, currentGuideLevels + node.depth)
                 }
             }
         }
-        folderNames.sortedWith(String.CASE_INSENSITIVE_ORDER)
-    }
-
-    val directFiles = remember(files, currentPath) {
-        files.filter { entry ->
-            if (entry.isDirectory) false
-            else if (currentPath.isEmpty()) {
-                !entry.path.contains('/')
-            } else {
-                entry.path.startsWith(prefix) && !entry.path.removePrefix(prefix).contains('/')
-            }
-        }.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        traverse(rootTreeNodes, emptyList())
+        result
     }
 
     val fileRoot = LocalAttachmentRoot.current
@@ -5413,23 +5449,23 @@ private fun ZipContentsScreen(
     var showRenameZipDialog by remember { mutableStateOf(false) }
     var renameZipText by remember(zipName) { mutableStateOf(zipName) }
 
-    // Part 4/5: on-demand static preview. One server per open preview sheet,
-    // closed as soon as the sheet is dismissed or the screen leaves composition.
     var previewServer by remember { mutableStateOf<StaticPreviewServer?>(null) }
     var previewInitialEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
-    val startPreview: () -> Unit = start@{
-        val entryFile = PreviewEntryResolver.findEntryFile(files) ?: run {
+    val startPreview: (WorkspaceEntry?) -> Unit = { targetEntry ->
+        val entryFile = targetEntry ?: PreviewEntryResolver.findEntryFile(files)
+        if (entryFile != null) {
+            val resolved = resolveWorkspaceFile(fileRoot, entryFile.path, fileContext)
+            if (resolved != null) {
+                val rootDir = PreviewEntryResolver.archiveRootDir(resolved, entryFile.path)
+                previewServer?.close()
+                previewServer = StaticPreviewServer(rootDir).start()
+                previewInitialEntry = entryFile
+            } else {
+                Toast.makeText(fileContext, "Couldn't read ${entryFile.name}", Toast.LENGTH_SHORT).show()
+            }
+        } else {
             Toast.makeText(fileContext, "No previewable HTML/TSX/JSX file found in $zipName", Toast.LENGTH_SHORT).show()
-            return@start
         }
-        val resolved = resolveWorkspaceFile(fileRoot, entryFile.path, fileContext) ?: run {
-            Toast.makeText(fileContext, "Couldn't read ${entryFile.name}", Toast.LENGTH_SHORT).show()
-            return@start
-        }
-        val rootDir = PreviewEntryResolver.archiveRootDir(resolved, entryFile.path)
-        previewServer?.close()
-        previewServer = StaticPreviewServer(rootDir).start()
-        previewInitialEntry = entryFile
     }
     DisposableEffect(Unit) {
         onDispose { previewServer?.close() }
@@ -5439,31 +5475,20 @@ private fun ZipContentsScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = if (currentPath.isEmpty()) zipName else currentPath.substringAfterLast('/'),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        if (currentPath.isNotEmpty()) {
-                            Text(
-                                text = "$zipName / $currentPath",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
+                    Text(
+                        text = zipName,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 },
                 navigationIcon = {
-                    IconButton(onClick = { if (canGoUp) onNavigateUp() else onBack() }) {
+                    IconButton(onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = if (canGoUp) "Go back up" else "Back to files",
+                            contentDescription = "Back to files",
                             tint = MaterialTheme.colorScheme.onSurface,
                         )
                     }
@@ -5496,7 +5521,7 @@ private fun ZipContentsScreen(
                                     },
                                     onClick = {
                                         zipMenuOpen = false
-                                        startPreview()
+                                        startPreview(null)
                                     },
                                 )
                             }
@@ -5548,7 +5573,7 @@ private fun ZipContentsScreen(
                 .padding(innerPadding),
             color = Color.White,
         ) {
-            if (subfolders.isEmpty() && directFiles.isEmpty()) {
+            if (visibleTreeItems.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -5564,106 +5589,138 @@ private fun ZipContentsScreen(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 ) {
-                    // 1. Folders first
-                    items(subfolders, key = { "folder-$it" }) { folderName ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 46.dp)
-                                .clickable {
-                                    currentPath = if (currentPath.isEmpty()) folderName else "$currentPath/$folderName"
-                                }
-                                .padding(horizontal = 4.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            FileTypeIcon(
-                                name = folderName,
-                                isDirectory = true,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                text = folderName,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color.Black,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = "Open folder",
-                                modifier = Modifier.size(18.dp),
-                                tint = Color(0xFF9CA3AF),
-                            )
-                        }
-                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 0.8.dp)
-                    }
-
-                    // 2. Files below
-                    items(directFiles, key = { "file-${it.path}" }) { entry ->
-                        val isChanged = entry.isNewInCurrentVersion
+                    items(visibleTreeItems, key = { "${it.node.path}-${it.node.isDirectory}" }) { item ->
+                        val node = item.node
+                        val isExpanded = expandedFolders.contains(node.path)
+                        val isChanged = node.entry?.isNewInCurrentVersion == true
                         val itemColor = if (isChanged) Color(0xFF16A34A) else Color.Black
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 46.dp)
-                                .clickable { onOpenFile(entry) }
-                                .padding(horizontal = 4.dp, vertical = 10.dp),
+                                .height(IntrinsicSize.Min)
+                                .clickable {
+                                    if (node.isDirectory) {
+                                        expandedFolders = if (isExpanded) {
+                                            expandedFolders - node.path
+                                        } else {
+                                            expandedFolders + node.path
+                                        }
+                                    } else {
+                                        node.entry?.let { onOpenFile(it) }
+                                    }
+                                }
+                                .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // Tree guidelines for ancestor levels
+                            for (lvl in 0 until item.depth) {
+                                if (item.guideLineLevels.contains(lvl)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(22.dp)
+                                            .fillMaxHeight(),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(1.dp)
+                                                .fillMaxHeight()
+                                                .background(Color(0xFFE5E7EB))
+                                        )
+                                    }
+                                } else {
+                                    Spacer(modifier = Modifier.width(22.dp))
+                                }
+                            }
+
+                            // Expand icon for directories or spacer for files
+                            if (node.isDirectory) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clickable {
+                                            expandedFolders = if (isExpanded) {
+                                                expandedFolders - node.path
+                                            } else {
+                                                expandedFolders + node.path
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                        contentDescription = if (isExpanded) "Collapse folder" else "Expand folder",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = Color(0xFF6B7280),
+                                    )
+                                }
+                            } else {
+                                Spacer(modifier = Modifier.width(24.dp))
+                            }
+
+                            Spacer(Modifier.width(2.dp))
+
                             FileTypeIcon(
-                                name = entry.name,
-                                isDirectory = false,
+                                name = node.name,
+                                isDirectory = node.isDirectory,
                                 modifier = Modifier.size(20.dp),
                             )
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
+
+                            Spacer(Modifier.width(10.dp))
+
+                            Column(modifier = Modifier.weight(1f).padding(vertical = 6.dp)) {
                                 Text(
-                                    text = entry.name,
+                                    text = node.name,
                                     fontSize = 14.sp,
-                                    fontWeight = FontWeight.Normal,
+                                    fontWeight = if (node.isDirectory) FontWeight.Medium else FontWeight.Normal,
                                     color = itemColor,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                                if (entry.sizeBytes > 0) {
+                                if (!node.isDirectory && (node.entry?.sizeBytes ?: 0L) > 0L) {
                                     Text(
-                                        text = formatFileSize(entry.sizeBytes),
+                                        text = formatFileSize(node.entry!!.sizeBytes),
                                         fontSize = 11.sp,
                                         color = Color(0xFF9CA3AF),
                                     )
                                 }
                             }
-                            FileActionsMenu(
-                                onCopy = {
-                                    fileScope.launch {
-                                        val text = withContext(Dispatchers.IO) {
-                                            resolveWorkspaceFile(fileRoot, entry.path, fileContext)?.readText(Charsets.UTF_8)
+
+                            if (!node.isDirectory && node.entry != null) {
+                                val currentEntry = node.entry
+                                FileActionsMenu(
+                                    onPreview = if (PreviewEntryResolver.isPreviewable(node.name)) {
+                                        { startPreview(currentEntry) }
+                                    } else null,
+                                    onCopy = {
+                                        fileScope.launch {
+                                            val text = withContext(Dispatchers.IO) {
+                                                resolveWorkspaceFile(fileRoot, currentEntry.path, fileContext)?.readText(Charsets.UTF_8)
+                                            }
+                                            if (text != null) {
+                                                fileClipboard.setText(AnnotatedString(text))
+                                                Toast.makeText(fileContext, "Copied ${currentEntry.name}", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(fileContext, "Couldn't read ${currentEntry.name}", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
-                                        if (text != null) {
-                                            fileClipboard.setText(AnnotatedString(text))
-                                            Toast.makeText(fileContext, "Copied ${entry.name}", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            Toast.makeText(fileContext, "Couldn't read ${entry.name}", Toast.LENGTH_SHORT).show()
+                                    },
+                                    onDownload = { onDownloadFile(currentEntry) },
+                                    onShare = {
+                                        fileScope.launch {
+                                            val file = withContext(Dispatchers.IO) { resolveWorkspaceFile(fileRoot, currentEntry.path, fileContext) }
+                                            if (file != null) {
+                                                fileContext.startActivity(Intent.createChooser(shareFileIntent(fileContext, file), "Share ${currentEntry.name}"))
+                                            } else {
+                                                Toast.makeText(fileContext, "Couldn't read ${currentEntry.name}", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
-                                    }
-                                },
-                                onDownload = { onDownloadFile(entry) },
-                                onShare = {
-                                    fileScope.launch {
-                                        val file = withContext(Dispatchers.IO) { resolveWorkspaceFile(fileRoot, entry.path, fileContext) }
-                                        if (file != null) {
-                                            fileContext.startActivity(Intent.createChooser(shareFileIntent(fileContext, file), "Share ${entry.name}"))
-                                        } else {
-                                            Toast.makeText(fileContext, "Couldn't read ${entry.name}", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                },
-                            )
+                                    },
+                                )
+                            }
                         }
                         HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 0.8.dp)
                     }
@@ -6165,12 +6222,30 @@ private fun RootWorkspaceFileRow(
                 ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (entry.isDirectory) {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clickable(onClick = onToggleFolder),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (!isCollapsed) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isCollapsed) "Expand folder" else "Collapse folder",
+                        modifier = Modifier.size(16.dp),
+                        tint = Color(0xFF6B7280),
+                    )
+                }
+            } else {
+                Spacer(modifier = Modifier.width(24.dp))
+            }
+            Spacer(Modifier.width(2.dp))
             FileTypeIcon(
                 name = entry.name,
                 isDirectory = entry.isDirectory,
                 modifier = Modifier.size(20.dp),
             )
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = entry.name,
@@ -6195,19 +6270,7 @@ private fun RootWorkspaceFileRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (entry.isDirectory) {
-                IconButton(
-                    onClick = onToggleFolder,
-                    modifier = Modifier.size(32.dp),
-                ) {
-                    Icon(
-                        imageVector = if (isCollapsed) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.Default.KeyboardArrowDown,
-                        contentDescription = if (isCollapsed) "Expand folder" else "Collapse folder",
-                        modifier = Modifier.size(18.dp),
-                        tint = Color(0xFF9CA3AF),
-                    )
-                }
-            } else {
+            if (!entry.isDirectory) {
                 FileActionsMenu(
                     onCopy = {
                         scope.launch {
@@ -9792,84 +9855,119 @@ private fun ArchivePreviewSheet(
     var pickedEntry by remember(currentEntry) { mutableStateOf(currentEntry) }
     var menuOpen by remember { mutableStateOf(false) }
 
-    ModalBottomSheet(
+    BackHandler(onBack = onDismiss)
+
+    androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color.White,
-        dragHandle = null,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
     ) {
-        Column(Modifier.fillMaxSize().fillMaxHeight(0.95f)) {
-            // Header: launcher icon · live file-name title · "•••" -> Close
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BrandMark(compact = true)
-                Text(
-                    currentEntry.name,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                )
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Preview options")
-                    }
-                    DropdownMenu(
-                        expanded = menuOpen,
-                        onDismissRequest = { menuOpen = false },
-                        containerColor = Color.White,
-                        shape = RoundedCornerShape(14.dp),
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Close") },
-                            leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
-                            onClick = { menuOpen = false; onDismiss() },
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.White,
+            topBar = {
+                CenterAlignedTopAppBar(
+                    modifier = Modifier.statusBarsPadding(),
+                    title = {
+                        Text(
+                            text = currentEntry.name,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Close preview",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = Color.White,
+                    ),
+                )
+            },
+            bottomBar = {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding(),
+                    color = Color.White,
+                    shadowElevation = 0.dp,
+                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = { pickedEntry = currentEntry; showFileSwitcher = true }) {
+                            Icon(Icons.Default.SwapHoriz, contentDescription = "Change link", tint = Color.Black)
+                        }
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFF3F4F6),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.Default.Lock,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = Color(0xFF9CA3AF),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = server.urlFor(currentEntry.path),
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF6B7280),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                        IconButton(onClick = { webView?.reload() }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Reload preview", tint = Color.Black)
+                        }
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "Preview options", tint = Color.Black)
+                            }
+                            DropdownMenu(
+                                expanded = menuOpen,
+                                onDismissRequest = { menuOpen = false },
+                                containerColor = Color.White,
+                                shape = RoundedCornerShape(14.dp),
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Close") },
+                                    leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
+                                    onClick = { menuOpen = false; onDismiss() },
+                                )
+                            }
+                        }
                     }
                 }
-            }
-            HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 0.8.dp)
-
-            // Safari-style address bar
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            },
+        ) { innerPadding ->
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
             ) {
-                IconButton(onClick = { pickedEntry = currentEntry; showFileSwitcher = true }) {
-                    Icon(Icons.Default.SwapHoriz, contentDescription = "Switch previewed file")
-                }
-                Icon(
-                    Icons.Default.Lock,
-                    contentDescription = null,
-                    modifier = Modifier.size(13.dp),
-                    tint = Color(0xFF9CA3AF),
-                )
-                Spacer(Modifier.width(6.dp))
-                Surface(
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFFF3F4F6),
-                ) {
-                    Text(
-                        text = server.urlFor(currentEntry.path),
-                        fontSize = 12.sp,
-                        color = Color(0xFF6B7280),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                    )
-                }
-                IconButton(onClick = { webView?.reload() }) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Reload preview")
-                }
-            }
-            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
 
-            Box(Modifier.weight(1f).fillMaxWidth()) {
                 AndroidView(
                     factory = { context ->
                         WebView(context).apply {
