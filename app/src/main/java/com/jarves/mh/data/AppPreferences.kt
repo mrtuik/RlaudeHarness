@@ -379,6 +379,10 @@ class AppPreferences(private val context: Context) {
                             put("detail", item.detail)
                             put("isComplete", item.isComplete)
                             put("isCommand", item.isCommand)
+                            item.contextLabel?.let { put("contextLabel", it) }
+                            item.archiveName?.let { put("archiveName", it) }
+                            item.readVersionTag?.let { put("readVersionTag", it) }
+                            item.writeVersionTag?.let { put("writeVersionTag", it) }
                         })
                     }
                 })
@@ -427,6 +431,10 @@ class AppPreferences(private val context: Context) {
                                     detail = item.optString("detail"),
                                     isComplete = item.optBoolean("isComplete", true),
                                     isCommand = item.optBoolean("isCommand", false),
+                                    contextLabel = item.optString("contextLabel").ifBlank { null },
+                                    archiveName = item.optString("archiveName").ifBlank { null },
+                                    readVersionTag = item.optString("readVersionTag").ifBlank { null },
+                                    writeVersionTag = item.optString("writeVersionTag").ifBlank { null },
                                 )
                             }
                         }.getOrNull()
