@@ -373,6 +373,14 @@ data class ActivityItem(
     val detail: String,
     val isComplete: Boolean = true,
     val isCommand: Boolean = false,
+    // Part 1: read/write version context for Write/Bash/Read tool calls. contextLabel is
+    // "Root" for the whole-project version chain or "Work" for an imported archive's own
+    // chain; archiveName is set only for "Work". Both version tags are null for tool calls
+    // that don't touch a versioned path (e.g. Grep, Glob, questions, plain log lines).
+    val contextLabel: String? = null,
+    val archiveName: String? = null,
+    val readVersionTag: String? = null,
+    val writeVersionTag: String? = null,
 )
 
 fun stripEmojis(input: String): String {
