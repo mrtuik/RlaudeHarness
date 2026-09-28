@@ -610,6 +610,15 @@ class WorkspaceCheckpoints(private val filesDir: File) {
         .filter { it.isFile && !isInternalRuntimePath(it.relativeTo(root).invariantSeparatorsPath) }
         .associate { it.relativeTo(root).path to digest(it) }
 
+    /** Cheap stat-only fingerprint (path + size + mtime, no hashing) used to detect late writes. */
+    fun quickSignature(root: File): Int {
+        var h = 1
+        root.walkTopDown()
+            .filter { it.isFile && !isInternalRuntimePath(it.relativeTo(root).invariantSeparatorsPath) }
+            .forEach { h = 31 * h + (it.relativeTo(root).path.hashCode() xor it.length().hashCode() xor it.lastModified().hashCode()) }
+        return h
+    }
+
     fun changedFiles(root: File, before: Map<String, String>): List<String> {
         val after = snapshot(root)
         return (before.keys + after.keys).distinct().filter { before[it] != after[it] }.sorted()
