@@ -2457,6 +2457,7 @@ private fun RootScreenHost(
                     onAddApiKey = viewModel::addApiKey,
                     onActivateApiKey = viewModel::activateApiKey,
                     onRemoveApiKey = viewModel::removeApiKey,
+                    onBack = { screen = RootScreen.PROJECTS },
                     onSelectAgent = viewModel::selectAgent,
                     onInstallAgent = viewModel::installAgent,
                     onCheckAgentUpdates = viewModel::checkAgentUpdates,
@@ -3537,9 +3538,19 @@ private fun ProjectsScreen(
     Scaffold(
         containerColor = Color.White,
         topBar = {
-            TopAppBar(
+            androidx.compose.material3.CenterAlignedTopAppBar(
                 modifier = Modifier.padding(top = 8.dp),
-                title = { Row(verticalAlignment = Alignment.CenterVertically) { BrandMark(compact = true); Spacer(Modifier.width(9.dp)); Text("Rlaude Harness", fontWeight = FontWeight.Bold) } },
+                title = { Text("./Rlaude Harness", fontWeight = FontWeight.Bold, maxLines = 1) },
+                navigationIcon = {
+                    Box(Modifier.padding(start = 16.dp), contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = ImageVector.vectorResource(R.drawable.ic_rabbit),
+                            contentDescription = "Rlaude Harness",
+                            modifier = Modifier.size(28.dp),
+                            tint = Color.Black,
+                        )
+                    }
+                },
                 actions = {
                     IconButton(onClick = onOpenLogs) {
                         Icon(
@@ -4582,7 +4593,7 @@ private fun WorkspaceScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to chat")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = com.jarves.mh.ui.theme.PocketWorkspaceCanvas),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
             ) else CenterAlignedTopAppBar(
                 modifier = Modifier.padding(top = 8.dp),
                 title = {
@@ -4633,7 +4644,7 @@ private fun WorkspaceScreen(
                     }
                     if (state.isRunning) CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = com.jarves.mh.ui.theme.PocketWorkspaceCanvas),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
             )
         },
         bottomBar = {
@@ -10045,7 +10056,16 @@ private fun EmptyState(icon: ImageVector, title: String, body: String) {
 }
 
 @Composable
-private fun BrandMark(modifier: Modifier = Modifier, compact: Boolean = false) {
+private fun BrandMark(modifier: Modifier = Modifier, compact: Boolean = false, plain: Boolean = false) {
+    if (plain) {
+        Icon(
+            imageVector = ImageVector.vectorResource(R.drawable.ic_rabbit),
+            contentDescription = "Rlaude Harness",
+            modifier = modifier.size(if (compact) 26.dp else 40.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        return
+    }
     val size = if (compact) 32.dp else 50.dp
     val iconSize = if (compact) 17.dp else 24.dp
     val cornerRadius = if (compact) 9.dp else 14.dp
