@@ -8184,7 +8184,7 @@ private fun ImageAttachmentBottomSheet(
                             color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
-                            fontFamily = PoppinsFontFamily,
+                            fontFamily = com.jarves.mh.ui.theme.AppFontFamily,
                         )
                     }
                 }
