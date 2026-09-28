@@ -2188,6 +2188,10 @@ private fun RootScreenHost(
     var showCreate by rememberSaveable { mutableStateOf(false) }
     var quickActionsExpanded by remember { mutableStateOf(false) }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    // While the "Bring an existing project" sheet is open, the bottom nav pill slides away so
+    // the sheet rises from the very bottom of the screen instead of sitting on top of the pill.
+    val importSheetVisible = screen == RootScreen.PROJECTS &&
+        (importExpanded || state.projectImporting || state.gitCloneRunning)
     val terminalLines by viewModel.terminalLines.collectAsStateWithLifecycle()
     val isTerminalRunning by viewModel.isTerminalRunning.collectAsStateWithLifecycle()
     val terminalLiveOutput by viewModel.terminalLiveOutput.collectAsStateWithLifecycle()
@@ -2201,7 +2205,11 @@ private fun RootScreenHost(
             // bottom nav. The bottom nav is a single floating pill with three items: Projects
             // and Agent (icon-only), and Terminal (icon + label) merged in as the third item
             // instead of a separate overlapping FAB.
-            if (!keyboardVisible) {
+            AnimatedVisibility(
+                visible = !keyboardVisible && !importSheetVisible,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -3537,6 +3545,7 @@ private fun ProjectsScreen(
     }
     Scaffold(
         containerColor = Color.White,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             androidx.compose.material3.CenterAlignedTopAppBar(
                 modifier = Modifier.padding(top = 8.dp),
@@ -6200,22 +6209,36 @@ private fun RootWorkspaceFileRow(
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = entry.name,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.Black,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    if (isChanged) {
-                        Spacer(Modifier.width(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF22C55E)),
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = entry.name,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.Black,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (isChanged) {
+                            Spacer(Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF22C55E)),
+                            )
+                        }
+                    }
+                    if (entry.lastModifiedMillis > 0L) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = formatRelativeTime(entry.lastModifiedMillis),
+                            fontSize = 11.sp,
+                            color = Color(0xFF9CA3AF),
+                            maxLines = 1,
                         )
                     }
                 }
@@ -9605,6 +9628,25 @@ private fun QuestionCard(
     }
 }
 
+
+/** "Just now", "5 m ago", "3 h ago", "Yesterday", "4 days ago", "2 weeks ago", "1 month ago"... */
+private fun formatRelativeTime(millis: Long, now: Long = System.currentTimeMillis()): String {
+    val diff = (now - millis).coerceAtLeast(0L)
+    val minutes = diff / 60_000L
+    if (minutes < 1) return "Just now"
+    if (minutes < 60) return "$minutes m ago"
+    val zone = java.time.ZoneId.systemDefault()
+    val thenDay = java.time.Instant.ofEpochMilli(millis).atZone(zone).toLocalDate()
+    val today = java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+    val days = java.time.temporal.ChronoUnit.DAYS.between(thenDay, today)
+    if (days <= 0L) return "${minutes / 60} h ago"
+    if (days == 1L) return "Yesterday"
+    if (days < 7L) return "$days days ago"
+    if (days < 30L) { val w = days / 7; return if (w == 1L) "1 week ago" else "$w weeks ago" }
+    if (days < 365L) { val m = days / 30; return if (m == 1L) "1 month ago" else "$m months ago" }
+    val y = days / 365
+    return if (y == 1L) "1 year ago" else "$y years ago"
+}
 
 private fun formatFileSize(bytes: Long): String = when {
     bytes < 1_024 -> "$bytes B"
