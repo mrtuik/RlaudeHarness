@@ -2,19 +2,24 @@ package com.jarves.mh.ui
 
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.Composable
+import androidx.annotation.DrawableRes
 import androidx.compose.runtime.remember
+import android.util.TypedValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.imageResource
+import androidx.compose.ui.res.painterResource as composePainterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Icon as M3Icon
 
@@ -70,6 +75,24 @@ internal fun rememberTuikPainter(vector: ImageVector): Painter {
     val custom = painterResource(resId)
     val sizePx = with(density) { 24.dp.toPx() }
     return remember(custom, sizePx) { FixedSizePainter(custom, Size(sizePx, sizePx)) }
+}
+
+/**
+ * Drop-in replacement for androidx.compose.ui.res.painterResource.
+ * XML drawables behave exactly as before. PNGs are drawn with FilterQuality.High, because the
+ * default (Low) looks jagged/blurry when a big PNG (e.g. 512px) is scaled down to an 18-24dp icon.
+ */
+@Composable
+fun painterResource(@DrawableRes id: Int): Painter {
+    val context = LocalContext.current
+    val isXml = remember(id) {
+        val tv = TypedValue()
+        context.resources.getValue(id, tv, true)
+        tv.string?.endsWith(".xml") == true
+    }
+    if (isXml) return composePainterResource(id)
+    val bitmap = ImageBitmap.imageResource(id)
+    return remember(bitmap) { BitmapPainter(bitmap, filterQuality = FilterQuality.High) }
 }
 
 /** PNGs have a big pixel size; report 24dp like Material vectors so Icon() sizes them the same way. */
