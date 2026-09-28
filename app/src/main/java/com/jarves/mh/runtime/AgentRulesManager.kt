@@ -109,83 +109,13 @@ class AgentRulesManager(private val context: Context) {
         // Manager/worker split for big multi-file tasks. Small tasks stay single-agent.
         // If the agent has no subagent tool (or it fails), it must fall back to working alone.
         private val SUBAGENT_RULES = """
-            ## SUBAGENT WORKFLOW (every task that reads or changes code; needs a subagent tool)
-            You are the MANAGER. Use subagents for EVERY task that changes code, even if it
-            touches only one screen, one file or one function (that is one unit). Also use
-            READER subagents when a question needs looking inside the code. Use
-            root-tab/SCREENS.md and root-tab/SYMBOLS.md to build the plan.
-            Skip subagents only for plain chat that needs no code lookup.
-            If you have no subagent tool, or spawning one fails, work alone and say so in
-            one plain line.
-
-            ### Split the task into units
-            0. Do NOT read source files yourself before dispatching. Read only
-               root-tab/SCREENS.md and root-tab/SYMBOLS.md, then hand the reading to a READER.
-            1. Write a short plan: one line per unit = file + function + what must change.
-            2. Each unit gets its own pair of subagents:
-               - READER (read-only, use the research type if available): finds the exact
-                 spot and returns a brief. It must not edit anything.
-               - WRITER (needs write permission): receives the READER's brief and makes
-                 the edit. It edits only the function named in the brief.
-            3. The READER's reply must use exactly this format, max 10 lines:
-               FILE: path | FUNCTION: name | LINES: from-to
-               PROOF: exact visible texts that show this is the right screen
-               CURRENT: what the code does now, in 1-2 lines
-               CHANGE: exactly what the writer must do
-               DO NOT TOUCH: other functions in the same file that must stay unchanged
-            4. Give every subagent the workspace path, its single unit, and the rule
-               "do not touch any other file or function; reply in max 10 lines".
-            5. Give every subagent a clear name so the user can tell them apart, in the form
-               READER: FunctionName or WRITER: FunctionName (for example READER: PreviewTab).
-               Use the tool's name/title field if it has one; always also start the subagent's
-               prompt with that name on its own first line.
-
-            ### Building SCREENS.md (first time, or when it is missing or clearly stale)
-            - root-tab/SYMBOLS.md is written by the app before you start. Never ask a subagent
-              to create or edit it.
-            - Use SYMBOLS.md to list the UI source files (files with composables, screens,
-              pages or components). Start one READER per UI file, all in parallel. A very
-              large file (over about 150 KB) gets 2 to 4 READERs, each given a different
-              line range taken from SYMBOLS.md.
-            - Name them READER: FileName (or READER: FileName part 1).
-            - Each READER returns ONLY entries, one per screen/dialog/sheet/tab/menu, in
-              exactly this format, and writes no file:
-              SCREEN: name | FILE: path | FUNCTION: name (lines from-to) | REACHED FROM: how the
-              user gets here | TEXTS: exact visible titles, buttons, labels
-            - Only YOU (the manager) write root-tab/SCREENS.md: merge all replies, remove
-              duplicates, group by area, keep it under about 300 lines. Never let two
-              subagents write the same file.
-
-            ### Parallel rules (to avoid overwriting each other)
-            - Units in DIFFERENT files: their readers and writers may run in parallel.
-            - Units in the SAME file: run their writers one after another, never together,
-              and re-read the function before each edit (line numbers shift).
-            - A writer never starts without a READER brief for its unit.
-
-            ### Waiting and reporting (mandatory)
-            - After dispatching, keep calling the wait / check-status tool until EVERY subagent
-              has reported finished or failed. Never end your turn, and never start the manager
-              review, while any subagent is still running.
-            - Subagent edits ARE detected by the app: it compares the whole workspace before and
-              after the run. Never avoid subagents because of change tracking, and never report
-              a lesson saying otherwise.
-            - The WRITER's reply must end with one line:
-              EDITED: path | function | one-phrase summary   (or EDITED: none)
-            - Each time a subagent finishes, write ONE short line for the user: its name and what
-              it did, for example "READER: PreviewTab found the canvas color token." or
-              "WRITER: PreviewTab changed the canvas color." Nothing longer between steps.
-            - After a WRITER finishes, re-read the edited function yourself. If the file is
-              unchanged, or changed somewhere else, make the edit yourself with a direct edit
-              tool and say so in one line.
-
-            ### Manager review (mandatory, you do it yourself)
-            After all writers finish, for every unit:
-            1. Open the edited function and check it matches the READER's brief.
-            2. Confirm no other function or file changed (compare with the plan).
-            3. Run the project's verification command; fix errors yourself until clean.
-            4. Update root-tab/SCREENS.md if screens or visible texts changed.
-            5. Reply with a short numbered list: one item per unit, in plain words, at most
-               4 lines and about 50 words in total. No code, no diffs, no process description.
+            ## SUBAGENT WORKFLOW (single-agent mode)
+            Work directly as a single agent. Read files and make edits directly using your tools.
+            Do not spawn subagents for single-screen or routine edits, and do not use them to
+            read code or to build root-tab/SCREENS.md. Use root-tab/SYMBOLS.md to jump straight
+            to a function: grep its name there, then view only about 60 lines from that line.
+            Only if the user explicitly asks for subagents may you use them; then wait until every
+            subagent has finished and re-read the edited code yourself before finishing.
         """.trimIndent()
 
         private const val INDEX_MAX_ENTRIES = 6000
@@ -212,12 +142,10 @@ class AgentRulesManager(private val context: Context) {
             - Location is fixed: root-tab/SCREENS.md inside the workspace root. It is not part
               of the project source, so never copy it into source folders and NEVER create
               SCREENS.md or SYMBOLS.md at the project root or anywhere else.
-            - If it does not exist, create it BEFORE anything else, using parallel READER
-              subagents as described in "Building SCREENS.md" in the SUBAGENT WORKFLOW
-              section (if you have no subagent tool, scan the UI code yourself with
-              grep/find and never read huge files top to bottom). Cover every screen, page,
-              dialog, bottom sheet, tab, menu and major section.
-            - One compact entry per screen, 2-4 lines:
+            - If it does not exist, create it with just a one-line header. Do NOT scan the whole
+              project and do NOT start subagents to build it. Build it on demand: add or refresh
+              the entry for a screen only when you edit that screen or have to find it.
+            - One compact entry per screen you have touched, 2-4 lines:
               Screen name | file | function/component (approx line range) | how the user
               reaches it | exact visible texts (titles, buttons, labels, hints).
             - If it exists, read it first. Treat line numbers as hints only: confirm with
