@@ -1,22 +1,34 @@
 package com.jarves.mh.ui.theme
 
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.googlefonts.Font
+import androidx.compose.ui.text.googlefonts.GoogleFont
 import com.jarves.mh.R
 
 /**
- * Tiempos (Text cut) — used only for chat message text (user bubbles + AI markdown replies).
- * Font files live in res/font/ as tiempos_text_*.otf.
+ * App-wide font: Space Grotesk (Google Fonts, downloaded on demand through Google Play services,
+ * same mechanism as the old Poppins font, so the APK does not grow).
+ * If the font can't be loaded (no Play services / offline on first launch) Android falls back to the
+ * system font automatically. Code, terminal and file paths still use FontFamily.Monospace.
+ *
+ * To change the font later, change only the name below, e.g. GoogleFont("Sora").
  */
-val ChatFontFamily = FontFamily(
-    Font(R.font.tiempos_text_regular, FontWeight.Normal, FontStyle.Normal),
-    Font(R.font.tiempos_text_regular_italic, FontWeight.Normal, FontStyle.Italic),
-    Font(R.font.tiempos_text_medium, FontWeight.Medium, FontStyle.Normal),
-    Font(R.font.tiempos_text_medium_italic, FontWeight.Medium, FontStyle.Italic),
-    Font(R.font.tiempos_text_semibold, FontWeight.SemiBold, FontStyle.Normal),
-    Font(R.font.tiempos_text_semibold_italic, FontWeight.SemiBold, FontStyle.Italic),
-    Font(R.font.tiempos_text_bold, FontWeight.Bold, FontStyle.Normal),
-    Font(R.font.tiempos_text_bold_italic, FontWeight.Bold, FontStyle.Italic),
+private val fontProvider = GoogleFont.Provider(
+    providerAuthority = "com.google.android.gms.fonts",
+    providerPackage = "com.google.android.gms",
+    certificates = R.array.com_google_android_gms_fonts_certs,
 )
+
+private val appGoogleFont = GoogleFont("Space Grotesk")
+
+val AppFontFamily = FontFamily(
+    Font(googleFont = appGoogleFont, fontProvider = fontProvider, weight = FontWeight.Light),
+    Font(googleFont = appGoogleFont, fontProvider = fontProvider, weight = FontWeight.Normal),
+    Font(googleFont = appGoogleFont, fontProvider = fontProvider, weight = FontWeight.Medium),
+    Font(googleFont = appGoogleFont, fontProvider = fontProvider, weight = FontWeight.SemiBold),
+    Font(googleFont = appGoogleFont, fontProvider = fontProvider, weight = FontWeight.Bold),
+)
+
+/** Chat messages use the same app font. (Name kept so existing code keeps working.) */
+val ChatFontFamily: FontFamily = AppFontFamily
