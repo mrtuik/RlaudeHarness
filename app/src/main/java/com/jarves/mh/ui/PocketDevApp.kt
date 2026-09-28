@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.draw.drawBehind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import android.Manifest
@@ -3686,14 +3687,19 @@ private fun ProjectsScreen(
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
         ) {
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().fillMaxHeight(0.5f),
                 shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                 color = Color.White,
                 shadowElevation = 0.dp,
                 border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
             ) {
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding().padding(bottom = 16.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp)
+                        .navigationBarsPadding()
+                        .padding(bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Row(
@@ -5392,51 +5398,22 @@ private fun ZipContentsScreen(
     onDownloadFile: (WorkspaceEntry) -> Unit,
     onRenameZip: ((String) -> Unit)? = null,
 ) {
-    var currentPath by rememberSaveable(zipName) { mutableStateOf("") }
-    val canGoUp = currentPath.isNotEmpty()
-    val onNavigateUp = {
-        if (currentPath.contains('/')) {
-            currentPath = currentPath.substringBeforeLast('/')
-        } else {
-            currentPath = ""
-        }
-    }
-
-    BackHandler(enabled = true) {
-        if (canGoUp) {
-            onNavigateUp()
-        } else {
-            onBack()
-        }
-    }
-
-    val prefix = if (currentPath.isEmpty()) "" else "$currentPath/"
-
-    val subfolders = remember(files, currentPath) {
-        val folderNames = mutableSetOf<String>()
-        files.forEach { entry ->
-            val rel = if (currentPath.isEmpty()) entry.path else if (entry.path.startsWith(prefix)) entry.path.removePrefix(prefix) else null
-            if (rel != null && rel.isNotEmpty()) {
-                if (rel.contains('/')) {
-                    folderNames.add(rel.substringBefore('/'))
-                } else if (entry.isDirectory) {
-                    folderNames.add(rel)
-                }
+    // Folders start collapsed; expand/collapse in place (same tree design as the Work/Root tabs).
+    var expandedFolders by rememberSaveable(zipName) { mutableStateOf(setOf<String>()) }
+    val treeNodes = remember(files) { buildZipTree(files) }
+    val visibleNodes = remember(treeNodes, expandedFolders) {
+        treeNodes.filter { node ->
+            var visible = true
+            var cur = node.path.substringBeforeLast('/', "")
+            while (cur.isNotEmpty()) {
+                if (!expandedFolders.contains(cur)) { visible = false; break }
+                cur = cur.substringBeforeLast('/', "")
             }
+            visible
         }
-        folderNames.sortedWith(String.CASE_INSENSITIVE_ORDER)
     }
 
-    val directFiles = remember(files, currentPath) {
-        files.filter { entry ->
-            if (entry.isDirectory) false
-            else if (currentPath.isEmpty()) {
-                !entry.path.contains('/')
-            } else {
-                entry.path.startsWith(prefix) && !entry.path.removePrefix(prefix).contains('/')
-            }
-        }.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
-    }
+    BackHandler(enabled = true) { onBack() }
 
     val fileRoot = LocalAttachmentRoot.current
     val fileContext = LocalContext.current
@@ -5472,31 +5449,20 @@ private fun ZipContentsScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = if (currentPath.isEmpty()) zipName else currentPath.substringAfterLast('/'),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        if (currentPath.isNotEmpty()) {
-                            Text(
-                                text = "$zipName / $currentPath",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
+                    Text(
+                        text = zipName,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 },
                 navigationIcon = {
-                    IconButton(onClick = { if (canGoUp) onNavigateUp() else onBack() }) {
+                    IconButton(onClick = onBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = if (canGoUp) "Go back up" else "Back to files",
+                            contentDescription = "Back to files",
                             tint = MaterialTheme.colorScheme.onSurface,
                         )
                     }
@@ -5581,7 +5547,7 @@ private fun ZipContentsScreen(
                 .padding(innerPadding),
             color = Color.White,
         ) {
-            if (subfolders.isEmpty() && directFiles.isEmpty()) {
+            if (treeNodes.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -5599,106 +5565,111 @@ private fun ZipContentsScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                 ) {
-                    // 1. Folders first
-                    items(subfolders, key = { "folder-$it" }) { folderName ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 46.dp)
-                                .clickable {
-                                    currentPath = if (currentPath.isEmpty()) folderName else "$currentPath/$folderName"
-                                }
-                                .padding(horizontal = 4.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            FileTypeIcon(
-                                name = folderName,
-                                isDirectory = true,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                text = folderName,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color.Black,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = "Open folder",
-                                modifier = Modifier.size(18.dp),
-                                tint = Color(0xFF9CA3AF),
-                            )
-                        }
-                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 0.8.dp)
-                    }
-
-                    // 2. Files below
-                    items(directFiles, key = { "file-${it.path}" }) { entry ->
-                        val isChanged = entry.isNewInCurrentVersion
-                        val itemColor = if (isChanged) Color(0xFF16A34A) else Color.Black
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 46.dp)
-                                .clickable { onOpenFile(entry) }
-                                .padding(horizontal = 4.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            FileTypeIcon(
-                                name = entry.name,
-                                isDirectory = false,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = entry.name,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Normal,
-                                    color = itemColor,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (entry.sizeBytes > 0) {
+                    items(visibleNodes, key = { "node-${it.path}" }) { node ->
+                        val entry = node.entry
+                        if (entry == null) {
+                            val expanded = expandedFolders.contains(node.path)
+                            Column(Modifier.fillMaxWidth().treeGuides(node.depth)) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 46.dp)
+                                        .clickable {
+                                            expandedFolders = if (expanded) expandedFolders - node.path else expandedFolders + node.path
+                                        }
+                                        .padding(start = treeStartPadding(node.depth), end = 4.dp, top = 10.dp, bottom = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    FileTypeIcon(
+                                        name = node.name,
+                                        isDirectory = true,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                    Spacer(Modifier.width(12.dp))
                                     Text(
-                                        text = formatFileSize(entry.sizeBytes),
-                                        fontSize = 11.sp,
-                                        color = Color(0xFF9CA3AF),
+                                        text = node.name,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color.Black,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Icon(
+                                        imageVector = if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = if (expanded) "Collapse folder" else "Expand folder",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = Color(0xFF9CA3AF),
                                     )
                                 }
+                                HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 0.8.dp)
                             }
-                            FileActionsMenu(
-                                onCopy = {
-                                    fileScope.launch {
-                                        val text = withContext(Dispatchers.IO) {
-                                            resolveWorkspaceFile(fileRoot, entry.path, fileContext)?.readText(Charsets.UTF_8)
-                                        }
-                                        if (text != null) {
-                                            fileClipboard.setText(AnnotatedString(text))
-                                            Toast.makeText(fileContext, "Copied ${entry.name}", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            Toast.makeText(fileContext, "Couldn't read ${entry.name}", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val isChanged = entry.isNewInCurrentVersion
+                            val itemColor = if (isChanged) Color(0xFF16A34A) else Color.Black
+                            Column(Modifier.fillMaxWidth().treeGuides(node.depth)) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 46.dp)
+                                        .clickable { onOpenFile(entry) }
+                                        .padding(start = treeStartPadding(node.depth), end = 4.dp, top = 10.dp, bottom = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    FileTypeIcon(
+                                        name = entry.name,
+                                        isDirectory = false,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = entry.name,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Normal,
+                                            color = itemColor,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (entry.sizeBytes > 0) {
+                                            Text(
+                                                text = formatFileSize(entry.sizeBytes),
+                                                fontSize = 11.sp,
+                                                color = Color(0xFF9CA3AF),
+                                            )
                                         }
                                     }
-                                },
-                                onDownload = { onDownloadFile(entry) },
-                                onShare = {
-                                    fileScope.launch {
-                                        val file = withContext(Dispatchers.IO) { resolveWorkspaceFile(fileRoot, entry.path, fileContext) }
-                                        if (file != null) {
-                                            fileContext.startActivity(Intent.createChooser(shareFileIntent(fileContext, file), "Share ${entry.name}"))
-                                        } else {
-                                            Toast.makeText(fileContext, "Couldn't read ${entry.name}", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                },
-                            )
+                                    Spacer(Modifier.width(10.dp))
+                                    FileActionsMenu(
+                                        onCopy = {
+                                            fileScope.launch {
+                                                val text = withContext(Dispatchers.IO) {
+                                                    resolveWorkspaceFile(fileRoot, entry.path, fileContext)?.readText(Charsets.UTF_8)
+                                                }
+                                                if (text != null) {
+                                                    fileClipboard.setText(AnnotatedString(text))
+                                                    Toast.makeText(fileContext, "Copied ${entry.name}", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    Toast.makeText(fileContext, "Couldn't read ${entry.name}", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        },
+                                        onDownload = { onDownloadFile(entry) },
+                                        onShare = {
+                                            fileScope.launch {
+                                                val file = withContext(Dispatchers.IO) { resolveWorkspaceFile(fileRoot, entry.path, fileContext) }
+                                                if (file != null) {
+                                                    fileContext.startActivity(Intent.createChooser(shareFileIntent(fileContext, file), "Share ${entry.name}"))
+                                                } else {
+                                                    Toast.makeText(fileContext, "Couldn't read ${entry.name}", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        },
+                                    )
+                                }
+                                HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 0.8.dp)
+                            }
                         }
-                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 0.8.dp)
                     }
                 }
             }
@@ -5751,6 +5722,56 @@ private fun ZipContentsScreen(
     }
 }
 
+private val TreeIndent = 20.dp
+private val TreeGuideColor = Color(0xFFD1D5DB)
+
+/** Vertical guide line for every ancestor level, so nested files sit under a visible rail. */
+private fun Modifier.treeGuides(depth: Int): Modifier =
+    if (depth <= 0) this else this.drawBehind {
+        val stroke = 1.dp.toPx()
+        val bleed = 3.dp.toPx() // bridges the gap between list items
+        for (level in 0 until depth) {
+            val x = (4.dp + TreeIndent * level + 10.dp).toPx()
+            drawLine(TreeGuideColor, Offset(x, -bleed), Offset(x, size.height + bleed), strokeWidth = stroke)
+        }
+    }
+
+private fun treeStartPadding(depth: Int): Dp = 4.dp + TreeIndent * depth
+
+/** "Check v1.0.zip", "Check v1.1.zip" ... */
+private fun versionZipName(slug: String, versionTag: String): String =
+    if (versionTag.isBlank()) "$slug.zip" else "$slug ${versionTag.trim().lowercase()}.zip"
+
+private class ZipTreeNode(val path: String, val name: String, val depth: Int, val entry: WorkspaceEntry?)
+
+private fun buildZipTree(files: List<WorkspaceEntry>): List<ZipTreeNode> {
+    fun parentOf(path: String) = path.substringBeforeLast('/', "")
+    val folderPaths = HashSet<String>()
+    val fileEntries = ArrayList<WorkspaceEntry>()
+    files.forEach { e ->
+        val clean = e.path.trimEnd('/')
+        if (e.isDirectory) folderPaths.add(clean) else fileEntries.add(e)
+        var p = parentOf(clean)
+        while (p.isNotEmpty()) { folderPaths.add(p); p = parentOf(p) }
+    }
+    val foldersByParent = folderPaths.groupBy { parentOf(it) }
+    val filesByParent = fileEntries.groupBy { parentOf(it.path) }
+    val out = ArrayList<ZipTreeNode>()
+    fun walk(parent: String, depth: Int) {
+        foldersByParent[parent].orEmpty()
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.substringAfterLast('/') })
+            .forEach { f ->
+                out.add(ZipTreeNode(f, f.substringAfterLast('/'), depth, null))
+                walk(f, depth + 1)
+            }
+        filesByParent[parent].orEmpty()
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+            .forEach { out.add(ZipTreeNode(it.path, it.name, depth, it)) }
+    }
+    walk("", 0)
+    return out
+}
+
 @Composable
 private fun VersionZipCard(
     modifier: Modifier = Modifier,
@@ -5769,47 +5790,56 @@ private fun VersionZipCard(
         shadowElevation = 0.dp,
         tonalElevation = 0.dp,
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
+                .padding(12.dp),
         ) {
-            SquareZipIcon(modifier = Modifier.size(26.dp), tint = Color.Black)
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = zipName,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.Black,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Surface(shape = RoundedCornerShape(4.dp), color = Color.Black) {
-                        Text(
-                            text = fileLabel,
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
-                        )
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
+            // Top-right: files count + version
+            Row(
+                modifier = Modifier.align(Alignment.TopEnd),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Surface(shape = RoundedCornerShape(4.dp), color = Color.Black) {
+                    Text(
+                        text = fileLabel,
                         color = Color.White,
-                        border = BorderStroke(1.dp, Color(0xFFD1D5DB)),
-                    ) {
-                        Text(
-                            text = versionTag,
-                            color = Color.Black,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
-                        )
-                    }
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, Color(0xFFD1D5DB)),
+                ) {
+                    Text(
+                        text = versionTag,
+                        color = Color.Black,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
+                    )
                 }
             }
+            // Center: big zip icon
+            SquareZipIcon(
+                modifier = Modifier.align(Alignment.Center).size(52.dp),
+                tint = Color.Black,
+            )
+            // Bottom: name
+            Text(
+                text = zipName,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.Black,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.BottomStart),
+            )
         }
     }
 }
@@ -5904,7 +5934,8 @@ private fun FilesTab(
     val hasFiles = files.any { !it.isDirectory }
     val zipVersionLabel = latestVersionTag.lowercase()
     var activeSubTab by rememberSaveable { mutableStateOf("Version") }
-    var collapsedFolders by rememberSaveable { mutableStateOf(setOf<String>()) }
+    // Folders start collapsed; only the ones the user opens are stored here.
+    var expandedFolders by rememberSaveable { mutableStateOf(setOf<String>()) }
     // Root tab = only CLAUDE.md/AGENTS.md and chat attachments (root-tab/attachment/<chatId>/...).
     // Work tab = everything else in the workspace (imported/created/changed project files).
     val tabFilteredFiles = remember(files, activeSubTab) {
@@ -5914,7 +5945,7 @@ private fun FilesTab(
             else -> files
         }
     }
-    val visibleRootFiles = remember(tabFilteredFiles, collapsedFolders) {
+    val visibleRootFiles = remember(tabFilteredFiles, expandedFolders) {
         tabFilteredFiles.filter { entry ->
             val parts = entry.path.split('/')
             if (parts.size <= 1) {
@@ -5924,7 +5955,7 @@ private fun FilesTab(
                 var cur = ""
                 for (i in 0 until parts.size - 1) {
                     cur = if (cur.isEmpty()) parts[i] else "$cur/${parts[i]}"
-                    if (collapsedFolders.contains(cur)) {
+                    if (!expandedFolders.contains(cur)) {
                         hidden = true
                         break
                     }
@@ -5976,18 +6007,6 @@ private fun FilesTab(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                if (!loading && activeSubTab == "Version" && hasFiles) {
-                    // Part 3: the bulk "download-tray" glyph is gone — this stays as the
-                    // export/share action only (per-file downloads now live in each file's
-                    // own 3-dot menu).
-                    IconButton(onClick = onExport, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = "Export project as ZIP",
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
                 if (loading) {
                     CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
                 } else {
@@ -6047,10 +6066,10 @@ private fun FilesTab(
                             val versionTag = version.versionTag.lowercase()
                             VersionZipCard(
                                 modifier = Modifier.weight(1f),
-                                zipName = "${projectSlug}.zip",
+                                zipName = versionZipName(projectSlug, versionTag),
                                 fileLabel = fileLabel,
                                 versionTag = versionTag,
-                                onClick = { onOpenVersionZip(version, "${projectSlug}.zip") },
+                                onClick = { onOpenVersionZip(version, versionZipName(projectSlug, versionTag)) },
                             )
                         }
                         if (row.size == 1) {
@@ -6142,16 +6161,16 @@ private fun FilesTab(
                 }
             } else {
                 items(visibleRootFiles, key = { "root-${it.path}" }) { entry ->
-                    val isCollapsed = collapsedFolders.contains(entry.path)
+                    val isCollapsed = !expandedFolders.contains(entry.path)
                     RootWorkspaceFileRow(
                         entry = entry,
                         isCollapsed = isCollapsed,
                         isChanged = entry.path in changedPaths,
                         onToggleFolder = {
-                            collapsedFolders = if (collapsedFolders.contains(entry.path)) {
-                                collapsedFolders - entry.path
+                            expandedFolders = if (expandedFolders.contains(entry.path)) {
+                                expandedFolders - entry.path
                             } else {
-                                collapsedFolders + entry.path
+                                expandedFolders + entry.path
                             }
                         },
                         onOpenFile = { onOpenFile(entry) },
@@ -6181,7 +6200,8 @@ private fun RootWorkspaceFileRow(
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameText by remember(entry.name) { mutableStateOf(entry.name) }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    val depth = entry.path.count { it == '/' }
+    Column(modifier = Modifier.fillMaxWidth().treeGuides(depth)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -6194,7 +6214,7 @@ private fun RootWorkspaceFileRow(
                     }
                 }
                 .padding(
-                    start = (4 + entry.depth * 10).coerceAtMost(28).dp,
+                    start = treeStartPadding(depth),
                     end = 4.dp,
                     top = 10.dp,
                     bottom = 10.dp,
@@ -6257,6 +6277,7 @@ private fun RootWorkspaceFileRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            Spacer(Modifier.width(10.dp))
             if (entry.isDirectory) {
                 IconButton(
                     onClick = onToggleFolder,
