@@ -101,7 +101,7 @@ private val LightColors = lightColorScheme(
     surfaceContainerHighest = Color(0xFFE6E6E6),
 )
 
-private val AppTypography: Typography = Typography().let { t ->
+private val AppTypography: Typography by lazy { Typography().let { t ->
     t.copy(
         displayLarge = t.displayLarge.copy(fontFamily = AppFontFamily),
         displayMedium = t.displayMedium.copy(fontFamily = AppFontFamily),
@@ -119,7 +119,7 @@ private val AppTypography: Typography = Typography().let { t ->
         labelMedium = t.labelMedium.copy(fontFamily = AppFontFamily),
         labelSmall = t.labelSmall.copy(fontFamily = AppFontFamily),
     )
-}
+} }
 
 enum class AppThemeMode { SYSTEM, DARK, LIGHT }
 
