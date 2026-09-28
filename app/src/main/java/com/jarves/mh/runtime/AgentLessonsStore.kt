@@ -61,6 +61,7 @@ class AgentLessonsStore(context: Context) :
         val normalizedLanguage = language.trim().lowercase().ifBlank { "general" }
         val normalizedSource = source.trim().lowercase().ifBlank { SOURCE_SELF_VERIFICATION }
         if (normalizedPattern.isBlank() || normalizedFix.isBlank()) return
+        if (isBogusLesson(normalizedPattern, normalizedFix)) return
         val now = System.currentTimeMillis()
         runCatching {
             writableDatabase.use { db ->
@@ -148,6 +149,7 @@ class AgentLessonsStore(context: Context) :
      * to a prompt when it is non-blank.
      */
     fun buildLessonsPromptSection(limit: Int = 8): String {
+        purgeBogusLessons()
         val lessons = topLessons(limit)
         if (lessons.isEmpty()) return ""
         val sb = StringBuilder()
@@ -158,6 +160,30 @@ class AgentLessonsStore(context: Context) :
             sb.appendLine("- [${lesson.language} · $tag] ${lesson.pattern} -> ${lesson.fix}")
         }
         return sb.toString().trimEnd('\n')
+    }
+
+    /**
+     * The app compares the whole workspace before/after a run, so subagent edits ARE tracked.
+     * An earlier agent wrongly recorded the opposite as a lesson; never store or replay it.
+     */
+    private fun isBogusLesson(pattern: String, fix: String): Boolean {
+        val t = "$pattern $fix".lowercase()
+        return t.contains("subagent") &&
+            (t.contains("not registered") || t.contains("host app") || t.contains("tracking") || t.contains("not tracked"))
+    }
+
+    private fun purgeBogusLessons() {
+        runCatching {
+            writableDatabase.use { db ->
+                db.execSQL(
+                    "DELETE FROM $TABLE WHERE lower($COL_PATTERN || ' ' || $COL_FIX) LIKE '%subagent%' AND (" +
+                        "lower($COL_PATTERN || ' ' || $COL_FIX) LIKE '%not registered%' OR " +
+                        "lower($COL_PATTERN || ' ' || $COL_FIX) LIKE '%host app%' OR " +
+                        "lower($COL_PATTERN || ' ' || $COL_FIX) LIKE '%tracking%' OR " +
+                        "lower($COL_PATTERN || ' ' || $COL_FIX) LIKE '%not tracked%')",
+                )
+            }
+        }
     }
 
     companion object {
