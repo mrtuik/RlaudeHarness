@@ -3684,7 +3684,7 @@ private fun ProjectsScreen(
                 border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
             ) {
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp).padding(bottom = 64.dp),
+                    modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding().padding(bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Row(
@@ -4479,6 +4479,7 @@ private fun WorkspaceScreen(
 
     var selectedTab by rememberSaveable { mutableStateOf(WorkspaceTab.CHAT) }
     BackHandler(enabled = selectedTab != WorkspaceTab.CHAT) { selectedTab = WorkspaceTab.CHAT }
+    var showPreviewSheet by rememberSaveable { mutableStateOf(false) }
     var showChats by rememberSaveable { mutableStateOf(false) }
     var activeZipScreen by rememberSaveable { mutableStateOf<String?>(null) }
     var activeZipVersionNumber by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -4657,7 +4658,7 @@ private fun WorkspaceScreen(
                     selectedTab = WorkspaceTab.FILES
                     onRefreshFiles()
                 },
-                onPreview = { selectedTab = WorkspaceTab.PREVIEW },
+                onPreview = { showPreviewSheet = true },
             )
         },
     ) { padding ->
@@ -4796,6 +4797,17 @@ private fun WorkspaceScreen(
                     PreviewTab(state.previewReady, state.previewUrl)
                 }
             }
+            }
+        }
+    }
+
+    if (showPreviewSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showPreviewSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
+            Box(Modifier.fillMaxSize().navigationBarsPadding()) {
+                PreviewTab(state.previewReady, state.previewUrl)
             }
         }
     }
