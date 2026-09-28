@@ -993,7 +993,8 @@ class ClaudeRuntimeBridge(
 
     private fun snapshot(root: File): Map<String, String> = root.walkTopDown()
         .filter { it.isFile && !isInternalRuntimePath(it.relativeTo(root).invariantSeparatorsPath) }
-        .associate { it.relativeTo(root).path to digest(it) }
+        // Size + modified time instead of hashing every byte: near-instant on big projects.
+        .associate { it.relativeTo(root).path to "${it.length()}_${it.lastModified()}" }
 
     private fun changedFiles(root: File, before: Map<String, String>): List<String> {
         val after = snapshot(root)
