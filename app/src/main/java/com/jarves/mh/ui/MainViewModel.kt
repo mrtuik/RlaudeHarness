@@ -41,6 +41,7 @@ import com.jarves.mh.model.PipelineTask
 import com.jarves.mh.model.PipelinePlan
 import com.jarves.mh.model.TaskStatus
 import com.jarves.mh.model.assignSubagents
+import com.jarves.mh.model.withFolderModifiedTimes
 import com.jarves.mh.model.parsePipelineTasks
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.ModelDiscoveryResult
@@ -3238,10 +3239,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     sizeBytes = if (file.isFile) file.length() else 0,
                     versionTag = "",
                     isNewInCurrentVersion = if (file.isDirectory) false else (relative in latestChanged),
+                    lastModifiedMillis = file.lastModified(),
                 )
             }
             .sortedWith(compareBy<WorkspaceEntry> { it.path.lowercase() }.thenByDescending { it.isDirectory })
             .toList()
+            .let { withFolderModifiedTimes(it) }
     }
 
     private fun isClaudeRuntimeMetadata(relativePath: String): Boolean {
