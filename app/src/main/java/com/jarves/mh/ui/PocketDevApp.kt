@@ -6544,7 +6544,7 @@ private fun ChatTab(
                             message.text.isNotBlank() &&
                             (
                                 (index < displayMessages.lastIndex && !displayMessages[index + 1].fromUser) ||
-                                    (index == displayMessages.lastIndex && isRunning && liveProcess.isNotEmpty())
+                                    (index == displayMessages.lastIndex && isRunning && (liveProcess.isNotEmpty() || thinkingActive))
                                 )
                         if (isNarration) {
                             NarrationText(message.text)
@@ -9290,7 +9290,7 @@ private fun MessageBubble(
             SelectionContainer {
                 MarkdownText(
                     markdown = stripEmojis(message.text),
-                    modifier = Modifier.padding(horizontal = 2.dp),
+                    modifier = Modifier.padding(start = 12.dp, end = 8.dp),
                     color = MaterialTheme.colorScheme.onSurface,
                     onRunCode = onRunInTerminal,
                 )
@@ -9298,13 +9298,13 @@ private fun MessageBubble(
             if (message.workedMillis > 0L) {
                 Text(
                     text = "Worked for ${formatDuration((message.workedMillis / 1_000L).coerceAtLeast(1L))}",
-                    modifier = Modifier.padding(start = 2.dp, top = 6.dp),
+                    modifier = Modifier.padding(start = 12.dp, top = 6.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                 )
                 if (message.text.isNotBlank()) {
                     Row(
-                        modifier = Modifier.padding(start = 0.dp, top = 6.dp),
+                        modifier = Modifier.padding(start = 10.dp, top = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         IconButton(
