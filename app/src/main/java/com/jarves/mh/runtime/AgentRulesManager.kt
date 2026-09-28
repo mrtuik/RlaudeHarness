@@ -162,6 +162,22 @@ class AgentRulesManager(private val context: Context) {
               and re-read the function before each edit (line numbers shift).
             - A writer never starts without a READER brief for its unit.
 
+            ### Waiting and reporting (mandatory)
+            - After dispatching, keep calling the wait / check-status tool until EVERY subagent
+              has reported finished or failed. Never end your turn, and never start the manager
+              review, while any subagent is still running.
+            - Subagent edits ARE detected by the app: it compares the whole workspace before and
+              after the run. Never avoid subagents because of change tracking, and never report
+              a lesson saying otherwise.
+            - The WRITER's reply must end with one line:
+              EDITED: path | function | one-phrase summary   (or EDITED: none)
+            - Each time a subagent finishes, write ONE short line for the user: its name and what
+              it did, for example "READER: PreviewTab found the canvas color token." or
+              "WRITER: PreviewTab changed the canvas color." Nothing longer between steps.
+            - After a WRITER finishes, re-read the edited function yourself. If the file is
+              unchanged, or changed somewhere else, make the edit yourself with a direct edit
+              tool and say so in one line.
+
             ### Manager review (mandatory, you do it yourself)
             After all writers finish, for every unit:
             1. Open the edited function and check it matches the READER's brief.
