@@ -6,9 +6,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,7 +23,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -46,7 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
@@ -85,25 +82,34 @@ fun PreviewPickerDialog(
     onDismiss: () -> Unit,
 ) {
     val items = remember(files) { previewCandidates(files) }
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(20.dp), color = Color.White) {
-            Column(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.94f),
+            shape = RoundedCornerShape(1.dp),
+            color = Color.White,
+        ) {
+            Column(Modifier.fillMaxWidth().padding(vertical = 20.dp)) {
                 Text(
-                    "Preview",
+                    "Preview with tuik",
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 17.sp,
-                    modifier = Modifier.padding(horizontal = 20.dp),
+                    fontSize = 20.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(14.dp))
                 if (items.isEmpty()) {
                     Text(
                         "No previewable files yet (.html)",
-                        fontSize = 14.sp,
+                        fontSize = 16.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
                     )
                 } else {
-                    LazyColumn(Modifier.fillMaxWidth().height((minOf(items.size, 6) * 62).dp)) {
+                    LazyColumn(Modifier.fillMaxWidth().height((minOf(items.size, 7) * 76).dp)) {
                         items(items, key = { it.path }) { entry ->
                             val selected = entry.path == currentPath
                             Row(
@@ -111,21 +117,21 @@ fun PreviewPickerDialog(
                                     .fillMaxWidth()
                                     .clickable { onPick(entry.path) }
                                     .background(if (selected) Color(0xFFF3F4F6) else Color.Transparent)
-                                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                                    .padding(horizontal = 20.dp, vertical = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Icon(
                                     painter = painterResource(R.drawable.ic_custom_file),
                                     contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
+                                    modifier = Modifier.size(28.dp),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                Spacer(Modifier.width(12.dp))
+                                Spacer(Modifier.width(16.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text(entry.name, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(entry.name, fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(
                                         entry.path,
-                                        fontSize = 12.sp,
+                                        fontSize = 13.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -166,7 +172,7 @@ fun PreviewScreen(
     var menuOpen by remember { mutableStateOf(false) }
     val url = server?.urlFor(path.trimStart('/'))
 
-    Column(Modifier.fillMaxSize().background(Color(0xFFF2F2F7)).statusBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding()) {
         Text(
             path.substringAfterLast('/'),
             fontWeight = FontWeight.SemiBold,
@@ -179,11 +185,7 @@ fun PreviewScreen(
         Box(
             Modifier
                 .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp)
-                .clip(RoundedCornerShape(26.dp))
-                .background(Color.White)
-                .border(BorderStroke(1.dp, Color(0xFFE0E0E5)), RoundedCornerShape(26.dp)),
+                .fillMaxWidth(),
         ) {
             if (url == null) {
                 Text(
@@ -196,6 +198,7 @@ fun PreviewScreen(
                     factory = { ctx ->
                         WebView(ctx).apply {
                             webView = this
+                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
                             webChromeClient = object : WebChromeClient() {
@@ -236,7 +239,7 @@ fun PreviewScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Box(
-                Modifier.size(42.dp).clip(CircleShape).background(Color.White).clickable { showPicker = true },
+                Modifier.size(42.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFF2F2F7)).clickable { showPicker = true },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(painterResource(R.drawable.ic_tuikchange), "Change file", Modifier.size(22.dp), tint = Color.Black)
@@ -245,8 +248,8 @@ fun PreviewScreen(
                 modifier = Modifier
                     .weight(1f)
                     .height(42.dp)
-                    .clip(RoundedCornerShape(21.dp))
-                    .background(Color.White)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0xFFF2F2F7))
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -262,7 +265,7 @@ fun PreviewScreen(
             }
             Box {
                 Box(
-                    Modifier.size(42.dp).clip(CircleShape).background(Color.White).clickable { menuOpen = true },
+                    Modifier.size(42.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFF2F2F7)).clickable { menuOpen = true },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Default.MoreVert, "Preview options", Modifier.size(22.dp), tint = Color.Black)
@@ -284,7 +287,7 @@ fun PreviewScreen(
                         onDismissRequest = { menuOpen = false },
                         properties = PopupProperties(focusable = true),
                     ) {
-                        Surface(shape = RoundedCornerShape(14.dp), color = Color.White, shadowElevation = 8.dp) {
+                        Surface(shape = RoundedCornerShape(2.dp), color = Color.White, shadowElevation = 8.dp) {
                             Column(Modifier.width(150.dp)) {
                                 Text(
                                     "Refresh",
