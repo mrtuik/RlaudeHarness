@@ -4,21 +4,25 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.Composable
 import androidx.annotation.DrawableRes
 import androidx.compose.runtime.remember
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.LruCache
 import android.util.TypedValue
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.unit.IntSize
+import kotlin.math.roundToInt
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.res.painterResource as composePainterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Icon as M3Icon
@@ -79,8 +83,11 @@ internal fun rememberTuikPainter(vector: ImageVector): Painter {
 
 /**
  * Drop-in replacement for androidx.compose.ui.res.painterResource.
- * XML drawables behave exactly as before. PNGs are drawn with FilterQuality.High, because the
- * default (Low) looks jagged/blurry when a big PNG (e.g. 512px) is scaled down to an 18-24dp icon.
+ * XML drawables behave exactly as before.
+ *
+ * PNGs: Android's canvas only does plain bilinear filtering (FilterQuality.High is the same as Low
+ * there), so drawing a 512px PNG at ~20dp (about 10x smaller) looks jagged. Instead the PNG is
+ * scaled down in steps of 2x (proper averaging) to the exact pixel size it is drawn at, once, and cached.
  */
 @Composable
 fun painterResource(@DrawableRes id: Int): Painter {
@@ -91,8 +98,60 @@ fun painterResource(@DrawableRes id: Int): Painter {
         tv.string?.endsWith(".xml") == true
     }
     if (isXml) return composePainterResource(id)
-    val bitmap = ImageBitmap.imageResource(id)
-    return remember(bitmap) { BitmapPainter(bitmap, filterQuality = FilterQuality.High) }
+    val bitmap = remember(id) { decodedBitmap(context, id) }
+    if (bitmap == null) return composePainterResource(id)
+    return remember(bitmap) { CrispBitmapPainter(bitmap, id) }
+}
+
+private val decodedCache = java.util.concurrent.ConcurrentHashMap<Int, Bitmap>()
+private val scaledCache = LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(96)
+
+private fun decodedBitmap(context: android.content.Context, id: Int): Bitmap? {
+    decodedCache[id]?.let { return it }
+    val opts = BitmapFactory.Options().apply {
+        inScaled = false
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    val bmp = BitmapFactory.decodeResource(context.resources, id, opts) ?: return null
+    decodedCache[id] = bmp
+    return bmp
+}
+
+private fun scaledBitmap(src: Bitmap, id: Int, w: Int, h: Int): androidx.compose.ui.graphics.ImageBitmap {
+    val key = "$id:$w:$h"
+    scaledCache.get(key)?.let { return it }
+    var cur = src
+    if (w < src.width || h < src.height) {
+        while (cur.width / 2 >= w && cur.height / 2 >= h) {
+            cur = Bitmap.createScaledBitmap(cur, cur.width / 2, cur.height / 2, true)
+        }
+        if (cur.width != w || cur.height != h) {
+            cur = Bitmap.createScaledBitmap(cur, w, h, true)
+        }
+    }
+    val out = cur.asImageBitmap()
+    scaledCache.put(key, out)
+    return out
+}
+
+private class CrispBitmapPainter(private val src: Bitmap, private val resId: Int) : Painter() {
+    private var alpha = 1f
+    private var colorFilter: ColorFilter? = null
+    override val intrinsicSize: Size = Size(src.width.toFloat(), src.height.toFloat())
+    override fun applyAlpha(alpha: Float): Boolean { this.alpha = alpha; return true }
+    override fun applyColorFilter(colorFilter: ColorFilter?): Boolean { this.colorFilter = colorFilter; return true }
+    override fun DrawScope.onDraw() {
+        val w = size.width.roundToInt().coerceAtLeast(1)
+        val h = size.height.roundToInt().coerceAtLeast(1)
+        val img = scaledBitmap(src, resId, w, h)
+        drawImage(
+            image = img,
+            dstSize = IntSize(w, h),
+            alpha = alpha,
+            colorFilter = colorFilter,
+            filterQuality = FilterQuality.Low,
+        )
+    }
 }
 
 /** PNGs have a big pixel size; report 24dp like Material vectors so Icon() sizes them the same way. */
