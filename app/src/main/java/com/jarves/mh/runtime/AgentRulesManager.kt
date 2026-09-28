@@ -44,7 +44,8 @@ class AgentRulesManager(private val context: Context) {
      * command line, for every agent bridge.
      */
     fun syncToWorkspace(workspace: File) {
-        val rules = currentRules()
+        val master = currentRules()
+        val rules = if (master.contains(SCREEN_MAP_MARKER)) master else master.trimEnd() + "\n\n" + SCREEN_MAP_RULES
         val banner = "<!-- Auto-synced from Rlaude Harness app settings. " +
             "Edit the master copy in-app, not this file — it is overwritten every run. -->\n\n"
         listOf("CLAUDE.md", "AGENTS.md").forEach { name ->
@@ -53,6 +54,52 @@ class AgentRulesManager(private val context: Context) {
     }
 
     companion object {
+        private const val SCREEN_MAP_MARKER = "## SCREEN MAP WORKFLOW"
+
+        // Always appended at sync time (unless the master rules already contain it), so
+        // devices that already have a saved RULES.md still get it. The agent builds and
+        // maintains root-tab/SCREENS.md itself; the "root-tab" folder is the Root tab in
+        // the Files UI and is excluded from version snapshots and "Files changed".
+        private val SCREEN_MAP_RULES = """
+            ## SCREEN MAP WORKFLOW (mandatory for every UI / screen / layout task)
+            Goal: edit exactly the screen the user means, never a guessed one.
+            The user may write short, messy, mixed Bengali/English text (Banglish). Do not
+            depend on their wording; identify the screen from evidence.
+
+            ### The map file: root-tab/SCREENS.md
+            - Location is fixed: root-tab/SCREENS.md inside the workspace root. It is not part
+              of the project source, so never copy it into source folders.
+            - If it does not exist, create it BEFORE anything else by scanning the UI code
+              (use grep/find, do not read huge files top to bottom). Cover every screen,
+              page, dialog, bottom sheet, tab, menu and major section.
+            - One compact entry per screen, 2-4 lines:
+              Screen name | file | function/component (approx line range) | how the user
+              reaches it | exact visible texts (titles, buttons, labels, hints).
+            - If it exists, read it first. Treat line numbers as hints only: confirm with
+              grep on the function name before editing, and fix stale entries.
+            - Keep it under about 300 lines. Do not mention this file in your summaries.
+
+            ### Every task that touches UI
+            1. If a screenshot is attached, open it first. Write down the exact visible texts
+               (titles, buttons, labels). The screenshot is the source of truth for WHICH
+               screen; the user's words only say WHAT to change.
+            2. If there is no screenshot, match the user's words against SCREENS.md (screen
+               names, visible texts, how the screen is reached).
+            3. Search the project for those exact texts to find the file and function, and
+               cross-check with SCREENS.md.
+            4. Before editing, write one plain line: Target = file, function, and the visible
+               text that proves it is the right screen.
+            5. If two or more screens are equally plausible, or nothing matches, call
+               ask_question with the candidates. Never edit a guessed screen.
+            6. If the screenshot looks like a design mockup (labels such as STATE A, annotation
+               text, a different layout than the live app), match it to the closest existing
+               screen and say which one you chose.
+            7. Change only the target function/component plus helpers it needs. Do not touch
+               other screens. Read the whole target function before editing it.
+            8. If the task adds, removes or renames a screen or its visible texts, update
+               root-tab/SCREENS.md before finishing.
+        """.trimIndent()
+
         // Synthesized from patterns that recur across several public
         // Claude Code / agentic-coding best-practice collections (not
         // copied verbatim from any one of them): keep the file short so it
