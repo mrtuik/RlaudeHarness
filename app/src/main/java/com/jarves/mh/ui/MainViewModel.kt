@@ -3130,10 +3130,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val (entries, suggestedRoot, androidProjectDetected) = withContext(Dispatchers.IO) {
                 val initialFiles = readWorkspace(project)
-                val finalFiles = if (initialFiles.any { !it.isDirectory } && checkpoints.loadVersions(project.id).isEmpty()) {
+                // Only real project files establish the initial baseline. App-generated helper
+                // files (AGENTS.md/CLAUDE.md, root-tab/*) are not project content, so a workspace
+                // holding only those must not get a v1.0 snapshot.
+                val hasProjectFiles = initialFiles.any {
+                    !it.isDirectory && !checkpoints.isInternalRuntimePath(it.path)
+                }
+                val finalFiles = if (hasProjectFiles && checkpoints.loadVersions(project.id).isEmpty()) {
                     val root = projectWorkspaceRoot(project)
-                    val allFilePaths = initialFiles.filter { !it.isDirectory }.map { it.path }
-                    checkpoints.recordVersionSnapshot(project.id, root, allFilePaths)
+                    // The first snapshot is the original state, not a change: no changed paths,
+                    // so nothing is flagged as new/changed in v1.0. Later writes are recorded by
+                    // finalizeVersion as before.
+                    checkpoints.recordVersionSnapshot(project.id, root, emptyList())
                     readWorkspace(project)
                 } else {
                     initialFiles
