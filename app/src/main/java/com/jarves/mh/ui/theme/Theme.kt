@@ -18,8 +18,8 @@ val PocketSurface = Color(0xFF141414)
 val PocketSurfaceVariant = Color(0xFF1F1F1F)
 val PocketOutline = Color(0xFF333333)
 
-/** Only the Workspace (chat) screen's own canvas — a warm paper tone instead of pure white. Used nowhere else. */
-val PocketWorkspaceCanvas = Color(0xFFF5F4EF)
+/** Only the Workspace (chat) screen's own canvas — a near-white tone with a barely-there warmth. Used nowhere else. */
+val PocketWorkspaceCanvas = Color(0xFFFDFDFC)
 
 // Strict monochrome. The only chromatic colour is a muted red reserved for errors / destructive actions.
 private val DarkColors = darkColorScheme(
