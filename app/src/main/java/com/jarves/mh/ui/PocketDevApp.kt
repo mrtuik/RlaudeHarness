@@ -4759,6 +4759,7 @@ private fun WorkspaceScreen(
                             exportVersionZipLauncher.launch("$exportName.zip")
                         },
                         onRenameFile = onRenameFile,
+                        changedPaths = remember(state.changes) { state.changes.map { it.path }.toSet() },
                     )
                 }
                 WorkspaceTab.TERMINAL -> Box(Modifier.fillMaxSize().navigationBarsPadding()) {
@@ -5889,6 +5890,7 @@ private fun FilesTab(
     onOpenVersionZip: (ProjectVersion, String) -> Unit = { _, _ -> },
     onExportVersionZip: (ProjectVersion) -> Unit = {},
     onRenameFile: (String, String) -> Unit = { _, _ -> },
+    changedPaths: Set<String> = emptySet(),
 ) {
     val hasFiles = files.any { !it.isDirectory }
     val zipVersionLabel = latestVersionTag.lowercase()
@@ -6135,6 +6137,7 @@ private fun FilesTab(
                     RootWorkspaceFileRow(
                         entry = entry,
                         isCollapsed = isCollapsed,
+                        isChanged = entry.path in changedPaths,
                         onToggleFolder = {
                             collapsedFolders = if (collapsedFolders.contains(entry.path)) {
                                 collapsedFolders - entry.path
@@ -6160,6 +6163,7 @@ private fun RootWorkspaceFileRow(
     onOpenFile: () -> Unit,
     onDownloadFile: () -> Unit,
     onRenameFile: (String, String) -> Unit,
+    isChanged: Boolean = false,
 ) {
     val fileRoot = LocalAttachmentRoot.current
     val context = LocalContext.current
@@ -6195,14 +6199,26 @@ private fun RootWorkspaceFileRow(
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = entry.name,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.Black,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = entry.name,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.Black,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (isChanged) {
+                        Spacer(Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF22C55E)),
+                        )
+                    }
+                }
                 val subtitle = if (entry.isDirectory) {
                     entry.path
                 } else if (entry.sizeBytes > 0) {
