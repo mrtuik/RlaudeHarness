@@ -159,6 +159,7 @@ fun AgentScreen(
     onDiscoverModels: suspend (ProviderProfile, String) -> ModelDiscoveryResult,
     onValidateProvider: suspend (ProviderProfile, String, List<DiscoveredModel>) -> ConnectionValidation,
     onPing: () -> Unit,
+    onBack: () -> Unit = {},
     getSavedApiKey: (ProviderKind) -> String,
     getSavedApiKeys: (ProviderKind) -> List<ApiKeyInfo>,
     onAddApiKey: (ProviderKind, String, String) -> List<ApiKeyInfo>,
@@ -722,26 +723,18 @@ fun AgentScreen(
     Scaffold(
         containerColor = Color.White,
         topBar = {
-            TopAppBar(
+            androidx.compose.material3.CenterAlignedTopAppBar(
                 modifier = Modifier.padding(top = 4.dp),
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column {
-                            Text("AI Agent", fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                            Text(
-                                if (isAntigravity) {
-                                    "Antigravity · ${formatAntigravityModelName(state.antigravityModel)}"
-                                } else {
-                                    "${state.agentKind.title} · ${model.ifBlank { selectedKind.title }}"
-                                },
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.Black,
+                        )
                     }
                 },
+                title = { Text("AI Agent", fontWeight = FontWeight.Bold, fontSize = 17.sp) },
                 actions = {
                     // Top Bar Live Status Pill
                     Surface(
