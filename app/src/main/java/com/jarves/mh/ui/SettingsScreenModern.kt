@@ -202,12 +202,9 @@ fun SettingsScreen(
                     }
                 },
                 title = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Settings", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-                        Text("Preferences & Configuration", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    Text("Settings", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBg),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
             )
         },
     ) { padding ->
