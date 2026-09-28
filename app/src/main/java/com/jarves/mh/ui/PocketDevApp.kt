@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.vectorResource
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.IntSize
 import com.jarves.mh.R
 import androidx.compose.material.icons.outlined.Add as AddOutlined
