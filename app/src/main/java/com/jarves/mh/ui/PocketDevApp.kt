@@ -4492,11 +4492,31 @@ private fun WorkspaceScreen(
 
     var selectedTab by rememberSaveable { mutableStateOf(WorkspaceTab.CHAT) }
     BackHandler(enabled = selectedTab != WorkspaceTab.CHAT) { selectedTab = WorkspaceTab.CHAT }
-    var showPreviewSheet by rememberSaveable { mutableStateOf(false) }
+    var showPreviewPicker by rememberSaveable { mutableStateOf(false) }
+    var previewPath by rememberSaveable { mutableStateOf<String?>(null) }
     var showChats by rememberSaveable { mutableStateOf(false) }
     var activeZipScreen by rememberSaveable { mutableStateOf<String?>(null) }
     var activeZipVersionNumber by rememberSaveable { mutableStateOf<Int?>(null) }
     val activeChat = state.projectChats.firstOrNull { it.id == state.activeChatId }
+
+    previewPath?.let { current ->
+        PreviewScreen(
+            path = current,
+            files = state.workspaceFiles,
+            fileRoot = attachmentRoot,
+            onPathChange = { previewPath = it },
+            onClose = { previewPath = null },
+        )
+        return
+    }
+    if (showPreviewPicker) {
+        PreviewPickerDialog(
+            files = state.workspaceFiles,
+            currentPath = null,
+            onPick = { showPreviewPicker = false; previewPath = it },
+            onDismiss = { showPreviewPicker = false },
+        )
+    }
 
     // If a file is open, show the FileViewerScreen on top
     if (state.openedFilePath != null) {
@@ -4671,12 +4691,15 @@ private fun WorkspaceScreen(
                     selectedTab = WorkspaceTab.FILES
                     onRefreshFiles()
                 },
-                onPreview = { showPreviewSheet = true },
+                onPreview = { showPreviewPicker = true },
             )
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            CompositionLocalProvider(LocalAttachmentRoot provides attachmentRoot) {
+            CompositionLocalProvider(
+                LocalAttachmentRoot provides attachmentRoot,
+                LocalOpenPreview provides { path -> previewPath = path },
+            ) {
             when (selectedTab) {
                 WorkspaceTab.CHAT -> ChatTab(
                     state.messages,
@@ -4814,17 +4837,6 @@ private fun WorkspaceScreen(
             }
         }
     }
-
-    if (showPreviewSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showPreviewSheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        ) {
-            Box(Modifier.fillMaxSize().navigationBarsPadding()) {
-                PreviewTab(state.previewReady, state.previewUrl)
-            }
-        }
-    }
 }
 
 @Composable
@@ -4894,7 +4906,6 @@ private fun FileViewerScreen(
     val fileName = filePath.substringAfterLast('/')
     val ext = fileName.substringAfterLast('.', "")
     val isMarkdown = ext == "md"
-    val isPreviewable = PreviewEntryResolver.isPreviewable(fileName)
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
@@ -4902,21 +4913,6 @@ private fun FileViewerScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameDraft by remember(showRenameDialog, fileName) { mutableStateOf(fileName) }
-
-    // Single-file preview: spin up a static server rooted at the file's own
-    // folder so relative assets (css/js/images next to it) still resolve.
-    var previewServer by remember { mutableStateOf<StaticPreviewServer?>(null) }
-    DisposableEffect(Unit) {
-        onDispose { previewServer?.close() }
-    }
-    val startPreview: () -> Unit = start@{
-        val resolved = resolveWorkspaceFile(fileRoot, filePath, context) ?: run {
-            Toast.makeText(context, "Couldn't read $fileName", Toast.LENGTH_SHORT).show()
-            return@start
-        }
-        previewServer?.close()
-        previewServer = StaticPreviewServer(resolved.parentFile ?: resolved).start()
-    }
 
     Scaffold(
         topBar = {
@@ -4945,23 +4941,6 @@ private fun FileViewerScreen(
                             containerColor = Color.White,
                             shape = RoundedCornerShape(14.dp),
                         ) {
-                            if (isPreviewable) {
-                                DropdownMenuItem(
-                                    text = { Text("Preview") },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Preview,
-                                            contentDescription = null,
-                                            tint = Color.Black,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    },
-                                    onClick = {
-                                        menuOpen = false
-                                        startPreview()
-                                    },
-                                )
-                            }
                             if (!content.isNullOrEmpty()) {
                                 DropdownMenuItem(
                                     text = { Text("Copy") },
@@ -5111,20 +5090,6 @@ private fun FileViewerScreen(
                 }
             }
         }
-    }
-
-    val activeServer = previewServer
-    if (activeServer != null) {
-        val entry = WorkspaceEntry(path = fileName, name = fileName, isDirectory = false, depth = 0)
-        ArchivePreviewSheet(
-            previewableFiles = listOf(entry),
-            initialEntry = entry,
-            server = activeServer,
-            onDismiss = {
-                previewServer?.close()
-                previewServer = null
-            },
-        )
     }
 }
 
@@ -5421,27 +5386,6 @@ private fun ZipContentsScreen(
     var showRenameZipDialog by remember { mutableStateOf(false) }
     var renameZipText by remember(zipName) { mutableStateOf(zipName) }
 
-    // Part 4/5: on-demand static preview. One server per open preview sheet,
-    // closed as soon as the sheet is dismissed or the screen leaves composition.
-    var previewServer by remember { mutableStateOf<StaticPreviewServer?>(null) }
-    var previewInitialEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
-    val startPreview: () -> Unit = start@{
-        val entryFile = PreviewEntryResolver.findEntryFile(files) ?: run {
-            Toast.makeText(fileContext, "No previewable HTML/TSX/JSX file found in $zipName", Toast.LENGTH_SHORT).show()
-            return@start
-        }
-        val resolved = resolveWorkspaceFile(fileRoot, entryFile.path, fileContext) ?: run {
-            Toast.makeText(fileContext, "Couldn't read ${entryFile.name}", Toast.LENGTH_SHORT).show()
-            return@start
-        }
-        val rootDir = PreviewEntryResolver.archiveRootDir(resolved, entryFile.path)
-        previewServer?.close()
-        previewServer = StaticPreviewServer(rootDir).start()
-        previewInitialEntry = entryFile
-    }
-    DisposableEffect(Unit) {
-        onDispose { previewServer?.close() }
-    }
 
     Scaffold(
         topBar = {
@@ -5480,23 +5424,6 @@ private fun ZipContentsScreen(
                             containerColor = Color.White,
                             shape = RoundedCornerShape(14.dp),
                         ) {
-                            if (PreviewEntryResolver.findEntryFile(files) != null) {
-                                DropdownMenuItem(
-                                    text = { Text("Preview") },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Preview,
-                                            contentDescription = null,
-                                            tint = Color.Black,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    },
-                                    onClick = {
-                                        zipMenuOpen = false
-                                        startPreview()
-                                    },
-                                )
-                            }
                             if (onRenameZip != null) {
                                 DropdownMenuItem(
                                     text = { Text("Rename") },
@@ -5672,21 +5599,6 @@ private fun ZipContentsScreen(
                 }
             }
         }
-    }
-
-    val activeServer = previewServer
-    val activeEntry = previewInitialEntry
-    if (activeServer != null && activeEntry != null) {
-        ArchivePreviewSheet(
-            previewableFiles = PreviewEntryResolver.previewableFiles(files),
-            initialEntry = activeEntry,
-            server = activeServer,
-            onDismiss = {
-                previewServer?.close()
-                previewServer = null
-                previewInitialEntry = null
-            },
-        )
     }
 
     if (showRenameZipDialog) {
@@ -6903,7 +6815,7 @@ private fun ChatTab(
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Icon(
-                                            painter = painterResource(R.drawable.ic_files),
+                                            painter = painterResource(R.drawable.ic_custom_file),
                                             contentDescription = null,
                                             modifier = Modifier.size(18.dp),
                                             tint = MaterialTheme.colorScheme.primary,
@@ -7114,7 +7026,7 @@ private fun ChatTab(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Files") },
-                                    leadingIcon = { Icon(ImageVector.vectorResource(R.drawable.ic_files), null, tint = Color.Black) },
+                                    leadingIcon = { Icon(painterResource(R.drawable.ic_custom_file), null, Modifier.size(20.dp), tint = Color.Black) },
                                     onClick = {
                                         attachMenuOpen = false
                                         onAttach()
@@ -7504,7 +7416,7 @@ private fun readAttachmentText(root: java.io.File?, attachment: ChatAttachment, 
  * Same candidate search readAttachmentText uses, but returns the actual File so
  * callers (download / share) can hand it to FileProvider or copy its bytes.
  */
-private fun resolveWorkspaceFile(root: java.io.File?, relativePath: String, context: Context? = null): java.io.File? {
+internal fun resolveWorkspaceFile(root: java.io.File?, relativePath: String, context: Context? = null): java.io.File? {
     val normalized = normalizeAttachmentPath(relativePath)
     val candidates = mutableListOf<java.io.File>()
     if (root != null) {
@@ -8283,8 +8195,8 @@ private fun NarrationText(text: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 12.dp, end = 8.dp),
-        fontSize = 13.sp,
-        lineHeight = 18.sp,
+        fontSize = 15.sp,
+        lineHeight = 21.sp,
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -8418,6 +8330,7 @@ private fun PerFileChangeCard(
 ) {
     val context = LocalContext.current
     val root = LocalAttachmentRoot.current
+    val openPreview = LocalOpenPreview.current
     val fileName = relativePath.substringAfterLast('/')
     val ext = fileName.substringAfterLast('.', "")
     val isImage = ext.lowercase() in setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "ico")
@@ -8485,6 +8398,9 @@ private fun PerFileChangeCard(
             onCopy = null,
             onDownload = { downloadLauncher.launch(fileName) },
             onShare = null,
+            onPreview = if (PreviewEntryResolver.isPreviewable(fileName)) {
+                { openPreview(relativePath) }
+            } else null,
         )
     }
 }
@@ -9947,194 +9863,6 @@ private fun PreviewTab(ready: Boolean, url: String?) {
     }
 }
 
-/**
- * Part 5: iOS-Safari-style bottom sheet chrome for the on-demand archive
- * static preview started from a file's "Preview" 3-dot menu action (Part 4).
- * Presented over the current screen; dismissible only via the header's
- * "•••" → Close action.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ArchivePreviewSheet(
-    previewableFiles: List<WorkspaceEntry>,
-    initialEntry: WorkspaceEntry,
-    server: StaticPreviewServer,
-    onDismiss: () -> Unit,
-) {
-    var currentEntry by remember(initialEntry) { mutableStateOf(initialEntry) }
-    var webView by remember { mutableStateOf<WebView?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var showFileSwitcher by remember { mutableStateOf(false) }
-    var pickedEntry by remember(currentEntry) { mutableStateOf(currentEntry) }
-    var menuOpen by remember { mutableStateOf(false) }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color.White,
-        dragHandle = null,
-    ) {
-        Column(Modifier.fillMaxSize().fillMaxHeight(0.95f)) {
-            // Header: launcher icon · live file-name title · "•••" -> Close
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BrandMark(compact = true)
-                Text(
-                    currentEntry.name,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                )
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Preview options")
-                    }
-                    DropdownMenu(
-                        expanded = menuOpen,
-                        onDismissRequest = { menuOpen = false },
-                        containerColor = Color.White,
-                        shape = RoundedCornerShape(14.dp),
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Close") },
-                            leadingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
-                            onClick = { menuOpen = false; onDismiss() },
-                        )
-                    }
-                }
-            }
-            HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 0.8.dp)
-
-            // Safari-style address bar
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = { pickedEntry = currentEntry; showFileSwitcher = true }) {
-                    Icon(Icons.Default.SwapHoriz, contentDescription = "Switch previewed file")
-                }
-                Icon(
-                    Icons.Default.Lock,
-                    contentDescription = null,
-                    modifier = Modifier.size(13.dp),
-                    tint = Color(0xFF9CA3AF),
-                )
-                Spacer(Modifier.width(6.dp))
-                Surface(
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFFF3F4F6),
-                ) {
-                    Text(
-                        text = server.urlFor(currentEntry.path),
-                        fontSize = 12.sp,
-                        color = Color(0xFF6B7280),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                    )
-                }
-                IconButton(onClick = { webView?.reload() }) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Reload preview")
-                }
-            }
-            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                AndroidView(
-                    factory = { context ->
-                        WebView(context).apply {
-                            webView = this
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            webChromeClient = object : WebChromeClient() {
-                                override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                    loading = newProgress < 100
-                                }
-                            }
-                            webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                    val target = request?.url ?: return true
-                                    return !target.isLoopbackPreviewUrl()
-                                }
-                                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                                    val target = request?.url ?: return blockedPreviewResponse()
-                                    return if (target.isLoopbackPreviewUrl()) null else blockedPreviewResponse()
-                                }
-                            }
-                            loadUrl(server.urlFor(currentEntry.path))
-                        }
-                    },
-                    update = { current ->
-                        webView = current
-                        val target = server.urlFor(currentEntry.path)
-                        if (current.url != target) current.loadUrl(target)
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-    }
-
-    if (showFileSwitcher) {
-        ModalBottomSheet(
-            onDismissRequest = { showFileSwitcher = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = Color.White,
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().fillMaxHeight(0.4f).padding(16.dp),
-            ) {
-                Text("Previewable files", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Spacer(Modifier.height(10.dp))
-                LazyColumn(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(previewableFiles, key = { it.path }) { entry ->
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth(0.85f)
-                                .clickable { pickedEntry = entry },
-                            shape = RoundedCornerShape(10.dp),
-                            color = Color.Black,
-                            border = if (pickedEntry.path == entry.path) BorderStroke(1.5.dp, Color.White) else null,
-                        ) {
-                            Text(
-                                text = entry.path,
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.End,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                Button(
-                    onClick = {
-                        currentEntry = pickedEntry
-                        showFileSwitcher = false
-                    },
-                    modifier = Modifier.align(Alignment.End),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Black),
-                ) {
-                    Text("Preview")
-                }
-            }
-        }
-    }
-}
-
 private fun normalizePreviewUrl(input: String): String? {
     val raw = input.trim()
     if (raw.isBlank()) return null
@@ -10153,11 +9881,11 @@ private fun normalizePreviewUrl(input: String): String? {
     }
 }
 
-private fun Uri.isLoopbackPreviewUrl(): Boolean =
+internal fun Uri.isLoopbackPreviewUrl(): Boolean =
     scheme in setOf("data", "blob", "about") ||
         (scheme in setOf("http", "https", "ws", "wss") && host in setOf("127.0.0.1", "localhost", "0.0.0.0"))
 
-private fun blockedPreviewResponse(): WebResourceResponse =
+internal fun blockedPreviewResponse(): WebResourceResponse =
     WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
 
 @Composable
