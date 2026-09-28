@@ -381,13 +381,17 @@ class AntigravityRuntimeBridge(
             val pending = StringBuilder()
             var resultSeen = false
             var assistantTextSeen = false
+            // Strips <SYSTEM_MESSAGE> blocks and [Task ... Output] markers even when split across deltas.
+            val textFilter = AntigravityOutputFilter()
+            suspend fun emitCleanText(text: String) {
+                if (text.isBlank()) return
+                assistantTextSeen = true
+                eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, text))
+            }
             suspend fun handleLine(line: String) {
                 when (val event = AntigravityEventParser.parse(line)) {
                     is AntigravityParsedEvent.Initialized -> saveConversationId(projectId, event.conversationId)
-                    is AntigravityParsedEvent.Text -> {
-                        assistantTextSeen = true
-                        eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, event.value))
-                    }
+                    is AntigravityParsedEvent.Text -> emitCleanText(textFilter.feed(event.value))
                     is AntigravityParsedEvent.ToolStarted -> eventBus.emit(RuntimeEvent.ToolStarted(sessionId, event.name, event.detail))
                     is AntigravityParsedEvent.ToolCompleted -> eventBus.emit(RuntimeEvent.ToolCompleted(sessionId, event.name, event.detail))
                     is AntigravityParsedEvent.Question -> {
@@ -408,8 +412,11 @@ class AntigravityRuntimeBridge(
                     is AntigravityParsedEvent.Result -> {
                         event.conversationId?.let { saveConversationId(projectId, it) }
                         if (!assistantTextSeen && !event.response.isNullOrBlank()) {
-                            assistantTextSeen = true
-                            eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, lessons.extractAndStore(event.response)))
+                            val cleaned = AntigravityOutputFilter.stripAll(event.response)
+                            if (cleaned.isNotBlank()) {
+                                assistantTextSeen = true
+                                eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, lessons.extractAndStore(cleaned)))
+                            }
                         }
                         if (event.status.equals("SUCCESS", ignoreCase = true)) {
                             resultSeen = true
@@ -441,6 +448,7 @@ class AntigravityRuntimeBridge(
                 }
             }
             pending.toString().trim().takeIf(String::isNotEmpty)?.let { handleLine(it) }
+            emitCleanText(textFilter.flush())
             val exit = process.waitFor()
             awaitWorkspaceSettled(ws)
             val paths = checkpoints.changedFiles(ws, snapshotBefore)
@@ -663,9 +671,8 @@ internal fun antigravityWorkspacePrompt(projectSlug: String, prompt: String, pas
 
     CRITICAL REQUIREMENT: Strictly avoid all emoji characters anywhere in your responses or generated text. Do NOT use any emojis under any circumstances.
 
-    MANDATORY WORK NARRATION (NOT OPTIONAL):
-    You must never run more than 3 tool calls in a row without pausing to write a short plain-language update outside any tool call. After every 2 to 3 tool calls, or whenever you move to a new sub-task (whichever comes first), stop and write a short update explaining what you just did, in your own words — do not chain everything silently and speak only once at the end.
-    Mid-task updates (anything you write between tool calls) must be very short: 1 to 2 plain sentences, about 25 words at most. Say only what you just found or what you are doing next. No numbered lists, no bold, no headings, no file paths, no quoted UI text, and do not restate the request.
+    $AGENT_TASK_RULES
+
     The FINAL summary, written once when all work is done, keeps the fuller form: clear, specific sentences of measured length that briefly connect what was needed to what was done, rephrased naturally each time; never use the literal phrase "you asked to".
     Never include code, code blocks, or diffs inside this narration text — code belongs only in the tool-call/file-change cards, never in plain prose.
     In the FINAL summary only, when listing multiple distinct items use a numbered list (1., 2., 3. ...) instead of bullet points, and bold the key word or file name at the start of each item.
@@ -677,14 +684,6 @@ internal fun antigravityWorkspacePrompt(projectSlug: String, prompt: String, pas
     Status questions must be answered before new work begins, regardless of where in the message they appear.
     If multiple questions exist, answer each one explicitly and separately in the response.
     Only after all questions in the message have been fully and directly answered should you proceed to any new task included in the same message.
-
-    SELF-VERIFICATION BEFORE FINISHING (MANDATORY, NOT OPTIONAL):
-    You must never end your turn or report the task as finished while any file you touched has a known syntax or compile error.
-    Before ending your turn, always determine and run the correct verification command for this project (its build tool, compiler, or linter). Only if genuinely no such tool exists for this project's language should you instead manually re-read every changed file line by line for syntax mistakes.
-    If the check reports any error, you must fix it yourself and re-run the check. Repeat this fix-and-recheck loop as many times as it takes until the check passes with zero errors. Do not stop after one attempt.
-    Do not report the task as "done", "finished", or "complete" unless the verification check has actually passed cleanly. There is no acceptable outcome where you say the task is finished and a compile or syntax error remains.
-    The only exception: if after real, repeated attempts an error still cannot be resolved, you must say so explicitly and describe exactly which error remains and why — never silently call it done.
-    Do not skip or shortcut this step to save time: a task that finishes fast but leaves broken code costs more of the user's time overall than one that takes a little longer and works on the first try.
 
     FILE EDITING STRATEGY (MANDATORY, NOT OPTIONAL):
     When modifying an existing file, first read only the relevant section with view_file, then change only that specific section using replace_file_content or multi_replace_file_content.
@@ -701,3 +700,75 @@ internal fun antigravityWorkspacePrompt(projectSlug: String, prompt: String, pas
     ${if (pastMistakesSection.isNotBlank()) "$pastMistakesSection\n" else ""}
     $prompt
 """.trimIndent()
+
+
+/**
+ * Removes internal machine output the CLI can echo into assistant text: <SYSTEM_MESSAGE>...</SYSTEM_MESSAGE>
+ * blocks and "[Task <id>/<name> Output|Finished]" markers. Stateful so tags split across streamed
+ * deltas are still caught. Ordinary prose (including the words "exit code") is left untouched.
+ */
+internal class AntigravityOutputFilter {
+    private var inBlock = false
+    private val buf = StringBuilder()
+
+    fun feed(chunk: String): String {
+        buf.append(chunk)
+        return drain(final = false)
+    }
+
+    fun flush(): String = drain(final = true)
+
+    private fun drain(final: Boolean): String {
+        val out = StringBuilder()
+        while (true) {
+            if (inBlock) {
+                val end = buf.indexOf(CLOSE)
+                if (end < 0) {
+                    if (final) buf.setLength(0)
+                    else if (buf.length > CLOSE.length - 1) buf.delete(0, buf.length - (CLOSE.length - 1))
+                    break
+                }
+                buf.delete(0, end + CLOSE.length)
+                inBlock = false
+                continue
+            }
+            val start = buf.indexOf(OPEN)
+            if (start >= 0) {
+                out.append(buf, 0, start)
+                buf.delete(0, start + OPEN.length)
+                inBlock = true
+                continue
+            }
+            val hold = if (final) 0 else heldSuffixLength()
+            out.append(buf, 0, buf.length - hold)
+            buf.delete(0, buf.length - hold)
+            break
+        }
+        return TASK_MARKER.replace(out.toString(), "")
+    }
+
+    /** How many trailing chars might be the start of a tag/marker that the next chunk completes. */
+    private fun heldSuffixLength(): Int {
+        var hold = 0
+        for (k in minOf(OPEN.length - 1, buf.length) downTo 1) {
+            if (bufEndsWith(OPEN.substring(0, k))) { hold = k; break }
+        }
+        val task = buf.lastIndexOf("[Task ")
+        if (task >= 0 && buf.indexOf("]", task) < 0 && buf.length - task < 160) hold = maxOf(hold, buf.length - task)
+        else for (k in minOf(5, buf.length) downTo 1) {
+            if (bufEndsWith("[Task ".substring(0, k))) { hold = maxOf(hold, k); break }
+        }
+        return hold
+    }
+
+    private fun bufEndsWith(suffix: String): Boolean =
+        buf.length >= suffix.length && buf.substring(buf.length - suffix.length) == suffix
+
+    companion object {
+        private const val OPEN = "<SYSTEM_MESSAGE>"
+        private const val CLOSE = "</SYSTEM_MESSAGE>"
+        private val TASK_MARKER = Regex("\\[Task [a-f0-9\\-]+/[\\w\\-]+ (Output|Finished)\\]")
+
+        fun stripAll(text: String): String = AntigravityOutputFilter().let { it.feed(text) + it.flush() }
+    }
+}
