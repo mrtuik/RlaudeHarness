@@ -608,7 +608,8 @@ class WorkspaceCheckpoints(private val filesDir: File) {
 
     fun snapshot(root: File): Map<String, String> = root.walkTopDown()
         .filter { it.isFile && !isInternalRuntimePath(it.relativeTo(root).invariantSeparatorsPath) }
-        .associate { it.relativeTo(root).path to digest(it) }
+        // Size + modified time instead of hashing every byte: near-instant on big projects.
+        .associate { it.relativeTo(root).path to "${it.length()}_${it.lastModified()}" }
 
     /** Cheap stat-only fingerprint (path + size + mtime, no hashing) used to detect late writes. */
     fun quickSignature(root: File): Int {
