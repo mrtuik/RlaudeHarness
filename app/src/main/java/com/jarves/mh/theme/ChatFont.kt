@@ -1,34 +1,149 @@
 package com.jarves.mh.ui.theme
 
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.googlefonts.Font
-import androidx.compose.ui.text.googlefonts.GoogleFont
-import com.jarves.mh.R
+import android.app.Activity
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.Typography
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
-/**
- * App-wide font: Space Grotesk (Google Fonts, downloaded on demand through Google Play services,
- * same mechanism as the old Poppins font, so the APK does not grow).
- * If the font can't be loaded (no Play services / offline on first launch) Android falls back to the
- * system font automatically. Code, terminal and file paths still use FontFamily.Monospace.
- *
- * To change the font later, change only the name below, e.g. GoogleFont("Sora").
- */
-private val fontProvider = GoogleFont.Provider(
-    providerAuthority = "com.google.android.gms.fonts",
-    providerPackage = "com.google.android.gms",
-    certificates = R.array.com_google_android_gms_fonts_certs,
+/** Neutral mid-grey used wherever the old palette had a coloured accent (readable on light and dark). */
+val PocketAccent = Color(0xFF737373)
+val PocketBackground = Color(0xFF0A0A0A)
+val PocketSurface = Color(0xFF141414)
+val PocketSurfaceVariant = Color(0xFF1F1F1F)
+val PocketOutline = Color(0xFF333333)
+
+/** Only the Workspace (chat) screen's own canvas — a near-white tone with a barely-there warmth. Used nowhere else. */
+val PocketWorkspaceCanvas = Color(0xFFFDFDFC)
+
+// Strict monochrome. The only chromatic colour is a muted red reserved for errors / destructive actions.
+private val DarkColors = darkColorScheme(
+    primary = Color(0xFFF2F2F2),
+    onPrimary = Color(0xFF111111),
+    primaryContainer = Color(0xFF262626),
+    onPrimaryContainer = Color(0xFFF2F2F2),
+    inversePrimary = Color(0xFF111111),
+    secondary = Color(0xFFBDBDBD),
+    onSecondary = Color(0xFF111111),
+    secondaryContainer = Color(0xFF2A2A2A),
+    onSecondaryContainer = Color(0xFFF2F2F2),
+    tertiary = Color(0xFFBDBDBD),
+    onTertiary = Color(0xFF111111),
+    tertiaryContainer = Color(0xFF2A2A2A),
+    onTertiaryContainer = Color(0xFFF2F2F2),
+    background = PocketBackground,
+    onBackground = Color(0xFFEDEDED),
+    surface = PocketSurface,
+    onSurface = Color(0xFFEDEDED),
+    surfaceVariant = PocketSurfaceVariant,
+    onSurfaceVariant = Color(0xFFC9C9C9),
+    surfaceTint = Color(0xFFF2F2F2),
+    inverseSurface = Color(0xFFEDEDED),
+    inverseOnSurface = Color(0xFF111111),
+    error = Color(0xFFE5A3A3),
+    onError = Color(0xFF3A0D0D),
+    errorContainer = Color(0xFF3A1D1D),
+    onErrorContainer = Color(0xFFF5CFCF),
+    outline = PocketOutline,
+    outlineVariant = Color(0xFF2A2A2A),
+    scrim = Color(0xFF000000),
+    surfaceBright = Color(0xFF2A2A2A),
+    surfaceDim = Color(0xFF0A0A0A),
+    surfaceContainerLowest = Color(0xFF050505),
+    surfaceContainerLow = Color(0xFF101010),
+    surfaceContainer = Color(0xFF141414),
+    surfaceContainerHigh = Color(0xFF1B1B1B),
+    surfaceContainerHighest = Color(0xFF222222),
 )
 
-private val appGoogleFont = GoogleFont("Space Grotesk")
-
-val AppFontFamily = FontFamily(
-    Font(googleFont = appGoogleFont, fontProvider = fontProvider, weight = FontWeight.Light),
-    Font(googleFont = appGoogleFont, fontProvider = fontProvider, weight = FontWeight.Normal),
-    Font(googleFont = appGoogleFont, fontProvider = fontProvider, weight = FontWeight.Medium),
-    Font(googleFont = appGoogleFont, fontProvider = fontProvider, weight = FontWeight.SemiBold),
-    Font(googleFont = appGoogleFont, fontProvider = fontProvider, weight = FontWeight.Bold),
+private val LightColors = lightColorScheme(
+    primary = Color(0xFF111111),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFEDEDED),
+    onPrimaryContainer = Color(0xFF111111),
+    inversePrimary = Color(0xFFF2F2F2),
+    secondary = Color(0xFF555555),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFE8E8E8),
+    onSecondaryContainer = Color(0xFF111111),
+    tertiary = Color(0xFF555555),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFE8E8E8),
+    onTertiaryContainer = Color(0xFF111111),
+    background = Color(0xFFFFFFFF),
+    onBackground = Color(0xFF111111),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF111111),
+    surfaceVariant = Color(0xFFEFEFEF),
+    onSurfaceVariant = Color(0xFF3D3D3D),
+    surfaceTint = Color(0xFF111111),
+    inverseSurface = Color(0xFF1A1A1A),
+    inverseOnSurface = Color(0xFFF2F2F2),
+    error = Color(0xFFB3261E),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFF5DEDC),
+    onErrorContainer = Color(0xFF410E0B),
+    outline = Color(0xFFD0D0D0),
+    outlineVariant = Color(0xFFE4E4E4),
+    scrim = Color(0xFF000000),
+    surfaceBright = Color(0xFFFFFFFF),
+    surfaceDim = Color(0xFFE6E6E6),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFFFFFFF),
+    surfaceContainer = Color(0xFFF2F2F2),
+    surfaceContainerHigh = Color(0xFFECECEC),
+    surfaceContainerHighest = Color(0xFFE6E6E6),
 )
 
-/** Chat messages use the same app font. (Name kept so existing code keeps working.) */
-val ChatFontFamily: FontFamily = AppFontFamily
+private val AppTypography: Typography by lazy { Typography().let { t ->
+    t.copy(
+        displayLarge = t.displayLarge.copy(fontFamily = AppFontFamily),
+        displayMedium = t.displayMedium.copy(fontFamily = AppFontFamily),
+        displaySmall = t.displaySmall.copy(fontFamily = AppFontFamily),
+        headlineLarge = t.headlineLarge.copy(fontFamily = AppFontFamily),
+        headlineMedium = t.headlineMedium.copy(fontFamily = AppFontFamily),
+        headlineSmall = t.headlineSmall.copy(fontFamily = AppFontFamily),
+        titleLarge = t.titleLarge.copy(fontFamily = AppFontFamily),
+        titleMedium = t.titleMedium.copy(fontFamily = AppFontFamily),
+        titleSmall = t.titleSmall.copy(fontFamily = AppFontFamily),
+        bodyLarge = t.bodyLarge.copy(fontFamily = AppFontFamily),
+        bodyMedium = t.bodyMedium.copy(fontFamily = AppFontFamily),
+        bodySmall = t.bodySmall.copy(fontFamily = AppFontFamily),
+        labelLarge = t.labelLarge.copy(fontFamily = AppFontFamily),
+        labelMedium = t.labelMedium.copy(fontFamily = AppFontFamily),
+        labelSmall = t.labelSmall.copy(fontFamily = AppFontFamily),
+    )
+} }
+
+enum class AppThemeMode { SYSTEM, DARK, LIGHT }
+
+@Composable
+fun PocketTheme(themeMode: AppThemeMode = AppThemeMode.LIGHT, content: @Composable () -> Unit) {
+    val isDark = when (themeMode) {
+        AppThemeMode.DARK -> true
+        AppThemeMode.LIGHT -> false
+        AppThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            val insetsController = WindowCompat.getInsetsController(window, view)
+            insetsController.isAppearanceLightStatusBars = !isDark
+            insetsController.isAppearanceLightNavigationBars = !isDark
+        }
+    }
+
+    MaterialTheme(
+        colorScheme = if (isDark) DarkColors else LightColors,
+        typography = AppTypography,
+        content = content,
+    )
+}
