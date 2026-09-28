@@ -6535,7 +6535,20 @@ private fun ChatTab(
                         if (message.workItems.isNotEmpty()) {
                             WorkBlockCard(message, projectSlug, onOpenFiles, onDownloadZip, onOpenChangedFile)
                         }
-                        if (message.text.isNotBlank() || (message.workItems.isEmpty() && message.fromUser)) {
+                        // Mid-turn narration: assistant prose with no tool card of its own that is
+                        // followed by more agent output in the same turn. The final reply of a turn
+                        // keeps the normal bubble.
+                        val isNarration = !message.fromUser &&
+                            message.workItems.isEmpty() &&
+                            message.workedMillis == 0L &&
+                            message.text.isNotBlank() &&
+                            (
+                                (index < displayMessages.lastIndex && !displayMessages[index + 1].fromUser) ||
+                                    (index == displayMessages.lastIndex && isRunning && liveProcess.isNotEmpty())
+                                )
+                        if (isNarration) {
+                            NarrationText(message.text)
+                        } else if (message.text.isNotBlank() || (message.workItems.isEmpty() && message.fromUser)) {
                             MessageBubble(
                                 message = message,
                                 onRunInTerminal = onRunInTerminal,
@@ -8262,6 +8275,21 @@ private fun extractTurnChangedPaths(message: ChatMessage): List<String> {
         return message.changedFiles
     }
     return emptyList()
+}
+
+/** Compact, bold, subtle activity narration shown between tool-call cards. */
+@Composable
+private fun NarrationText(text: String) {
+    Text(
+        text = stripEmojis(text).replace("**", "").trim(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 8.dp),
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
