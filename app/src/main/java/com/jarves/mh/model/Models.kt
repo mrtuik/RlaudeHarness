@@ -222,7 +222,29 @@ data class WorkspaceEntry(
     val sizeBytes: Long = 0,
     val versionTag: String = "",
     val isNewInCurrentVersion: Boolean = false,
+    val lastModifiedMillis: Long = 0,
 )
+
+/**
+ * Gives every folder the newest modified time found among the files inside it (a folder's own
+ * timestamp only changes when direct children are added or removed), so "changed X ago" on a
+ * folder reflects real edits deeper down.
+ */
+fun withFolderModifiedTimes(entries: List<WorkspaceEntry>): List<WorkspaceEntry> {
+    val newest = HashMap<String, Long>()
+    entries.forEach { entry ->
+        if (entry.isDirectory || entry.lastModifiedMillis <= 0L) return@forEach
+        var parent = entry.path.substringBeforeLast('/', "")
+        while (parent.isNotEmpty()) {
+            if ((newest[parent] ?: 0L) < entry.lastModifiedMillis) newest[parent] = entry.lastModifiedMillis
+            parent = parent.substringBeforeLast('/', "")
+        }
+    }
+    return entries.map { entry ->
+        if (!entry.isDirectory) entry
+        else entry.copy(lastModifiedMillis = maxOf(entry.lastModifiedMillis, newest[entry.path] ?: 0L))
+    }
+}
 
 enum class RiskLevel { SAFE, REVIEW, HIGH }
 
