@@ -128,6 +128,9 @@ private fun antigravityToolDetail(step: JSONObject, rawName: String): String {
     step.optString("description").takeIf(String::isNotBlank)?.let { return redactToolDetail(it) }
     val info = step.optJSONObject("tool_info")
     val parameters = info?.optJSONObject("parameters")
+    if (rawName.equals("invoke_subagent", true)) {
+        antigravitySubagentSummary(parameters)?.let { return redactToolDetail(it) }
+    }
     val preferredKeys = when (rawName.lowercase()) {
         "run_command" -> listOf("CommandLine", "command", "cmd")
         "write_to_file", "replace_file_content", "multi_replace_file_content" ->
@@ -153,6 +156,20 @@ private fun antigravityToolDetail(step: JSONObject, rawName: String): String {
     return parameters?.toString()?.takeUnless { it == "{}" }?.let(::redactToolDetail)
         ?: step.optJSONObject("tool")?.toString()?.let(::redactToolDetail)
         .orEmpty()
+}
+
+/** "READER: X + WRITER: X" instead of the raw {"Subagents":[...]} JSON on the Invoke subagent card. */
+private fun antigravitySubagentSummary(parameters: JSONObject?): String? {
+    val list = parameters?.optJSONArray("Subagents") ?: return null
+    val labels = (0 until list.length()).mapNotNull { i ->
+        val item = list.optJSONObject(i) ?: return@mapNotNull null
+        val explicit = listOf("Name", "Title", "Description", "Type")
+            .firstNotNullOfOrNull { key -> item.optString(key).takeIf(String::isNotBlank) }
+        val firstLine = item.optString("Prompt").lineSequence().map(String::trim).firstOrNull(String::isNotEmpty)
+        val named = firstLine?.takeIf { it.startsWith("READER", true) || it.startsWith("WRITER", true) }
+        (named ?: explicit ?: firstLine)?.take(60)
+    }
+    return labels.takeIf { it.isNotEmpty() }?.joinToString(" + ")
 }
 
 private fun redactToolDetail(value: String): String = value
@@ -184,6 +201,20 @@ class AntigravityRuntimeBridge(
     @Volatile private var foregroundResultPosted = false
 
     fun configureProjectRoot(projectId: String, rootPath: String) = checkpoints.configureProjectRoot(projectId, rootPath)
+
+    /**
+     * Waits (max ~4s) until no file in the workspace changes between two checks, so a write
+     * that lands right as agy exits (e.g. from a subagent) is still part of "Files changed".
+     */
+    private suspend fun awaitWorkspaceSettled(ws: File) {
+        var last = checkpoints.quickSignature(ws)
+        repeat(4) {
+            delay(1_000)
+            val now = checkpoints.quickSignature(ws)
+            if (now == last) return
+            last = now
+        }
+    }
 
     /**
      * Lightweight connectivity probe: sends a tiny hello to agy and returns its
@@ -411,6 +442,7 @@ class AntigravityRuntimeBridge(
             }
             pending.toString().trim().takeIf(String::isNotEmpty)?.let { handleLine(it) }
             val exit = process.waitFor()
+            awaitWorkspaceSettled(ws)
             val paths = checkpoints.changedFiles(ws, snapshotBefore)
             // agy sometimes tears down its network stream right after finishing real work, before
             // it manages to print the final Result JSON line. If the process still exited cleanly
@@ -633,10 +665,10 @@ internal fun antigravityWorkspacePrompt(projectSlug: String, prompt: String, pas
 
     MANDATORY WORK NARRATION (NOT OPTIONAL):
     You must never run more than 3 tool calls in a row without pausing to write a short plain-language update outside any tool call. After every 2 to 3 tool calls, or whenever you move to a new sub-task (whichever comes first), stop and write a short update explaining what you just did, in your own words — do not chain everything silently and speak only once at the end.
-    Write every update and the final summary the way a careful engineer explains their own work: clear, specific sentences of measured length — not a single terse fragment, and not a long wall of text either.
-    Every plain-language update — mid-task or the final summary — should briefly connect back to what was needed and what was done, but rephrase it naturally each time; never use the literal phrase "you asked to", and never repeat the exact same framing wording at every checkpoint.
+    Mid-task updates (anything you write between tool calls) must be very short: 1 to 2 plain sentences, about 25 words at most. Say only what you just found or what you are doing next. No numbered lists, no bold, no headings, no file paths, no quoted UI text, and do not restate the request.
+    The FINAL summary, written once when all work is done, keeps the fuller form: clear, specific sentences of measured length that briefly connect what was needed to what was done, rephrased naturally each time; never use the literal phrase "you asked to".
     Never include code, code blocks, or diffs inside this narration text — code belongs only in the tool-call/file-change cards, never in plain prose.
-    When listing multiple distinct items in any narration or summary, use a numbered list (1., 2., 3. ...) instead of bullet points, and bold the key word or file name at the start of each item.
+    In the FINAL summary only, when listing multiple distinct items use a numbered list (1., 2., 3. ...) instead of bullet points, and bold the key word or file name at the start of each item.
     Do not list the changed file paths as text in your narration or final summary — the app already shows a separate "Files changed" card with that information automatically, so repeating it in prose is redundant. Just describe in plain language what you changed and why.
 
     QUESTION AND TASK PRIORITIZATION:
