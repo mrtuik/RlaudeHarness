@@ -7463,6 +7463,7 @@ private fun TextAttachmentBottomSheet(
     val root = LocalAttachmentRoot.current
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val openPreview = LocalOpenPreview.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val textScrollState = rememberScrollState()
 
@@ -7561,6 +7562,9 @@ private fun TextAttachmentBottomSheet(
                         }
                     },
                     onDownload = { downloadLauncher.launch(currentDisplayName) },
+                    onPreview = if (PreviewEntryResolver.isPreviewable(currentDisplayName)) {
+                        { onDismiss(); openPreview(attachment.relativePath) }
+                    } else null,
                     onShare = {
                         val file = resolveWorkspaceFile(root, attachment.relativePath, context)
                         if (file != null) {
@@ -8330,7 +8334,7 @@ private fun PerFileChangeCard(
 ) {
     val context = LocalContext.current
     val root = LocalAttachmentRoot.current
-    val openPreview = LocalOpenPreview.current
+    val clipboard = LocalClipboardManager.current
     val fileName = relativePath.substringAfterLast('/')
     val ext = fileName.substringAfterLast('.', "")
     val isImage = ext.lowercase() in setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "ico")
@@ -8395,12 +8399,17 @@ private fun PerFileChangeCard(
             )
         }
         FileActionsMenu(
-            onCopy = null,
+            onCopy = if (isImage) null else ({
+                val text = runCatching { resolveWorkspaceFile(root, relativePath, context)?.readText() }.getOrNull()
+                if (!text.isNullOrBlank()) {
+                    clipboard.setText(AnnotatedString(text))
+                    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Couldn't read $fileName", Toast.LENGTH_SHORT).show()
+                }
+            }),
             onDownload = { downloadLauncher.launch(fileName) },
             onShare = null,
-            onPreview = if (PreviewEntryResolver.isPreviewable(fileName)) {
-                { openPreview(relativePath) }
-            } else null,
         )
     }
 }
