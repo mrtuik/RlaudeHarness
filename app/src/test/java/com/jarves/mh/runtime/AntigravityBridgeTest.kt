@@ -122,10 +122,24 @@ class AntigravityBridgeTest {
 
     @Test
     fun `workspace prompt keeps generated files in the mounted project`() {
-        val prompt = antigravityWorkspacePrompt("bold-kalam", "Create hello.py")
+        val prompt = antigravityWorkspacePrompt("bold-kalam", "Create hello.py", "")
         assertTrue("/workspace/bold-kalam" in prompt)
         assertTrue("Do not create project output" in prompt)
-        assertTrue("WORK NARRATION AND REAL-TIME UPDATES" in prompt)
+        assertTrue("TASK EXECUTION AND NARRATION RULES" in prompt)
         assertTrue(prompt.endsWith("Create hello.py"))
+    }
+
+    @Test
+    fun `output filter strips system message blocks split across deltas`() {
+        val filter = AntigravityOutputFilter()
+        val out = filter.feed("Done. <SYSTEM_MES") + filter.feed("SAGE>[Task ab12-cd/x Output] exit code: 0</SYSTEM_") +
+            filter.feed("MESSAGE> All good, exit code: 1 was expected.") + filter.flush()
+        assertEquals("Done.  All good, exit code: 1 was expected.", out)
+    }
+
+    @Test
+    fun `output filter drops standalone task markers and keeps plain text`() {
+        assertEquals("Hello", AntigravityOutputFilter.stripAll("Hello[Task 1a2b-3c/build Finished]"))
+        assertEquals("hi there", AntigravityOutputFilter.stripAll("hi there"))
     }
 }
