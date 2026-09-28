@@ -4,6 +4,7 @@ import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -100,6 +101,26 @@ private val LightColors = lightColorScheme(
     surfaceContainerHighest = Color(0xFFE6E6E6),
 )
 
+private val AppTypography: Typography = Typography().let { t ->
+    t.copy(
+        displayLarge = t.displayLarge.copy(fontFamily = AppFontFamily),
+        displayMedium = t.displayMedium.copy(fontFamily = AppFontFamily),
+        displaySmall = t.displaySmall.copy(fontFamily = AppFontFamily),
+        headlineLarge = t.headlineLarge.copy(fontFamily = AppFontFamily),
+        headlineMedium = t.headlineMedium.copy(fontFamily = AppFontFamily),
+        headlineSmall = t.headlineSmall.copy(fontFamily = AppFontFamily),
+        titleLarge = t.titleLarge.copy(fontFamily = AppFontFamily),
+        titleMedium = t.titleMedium.copy(fontFamily = AppFontFamily),
+        titleSmall = t.titleSmall.copy(fontFamily = AppFontFamily),
+        bodyLarge = t.bodyLarge.copy(fontFamily = AppFontFamily),
+        bodyMedium = t.bodyMedium.copy(fontFamily = AppFontFamily),
+        bodySmall = t.bodySmall.copy(fontFamily = AppFontFamily),
+        labelLarge = t.labelLarge.copy(fontFamily = AppFontFamily),
+        labelMedium = t.labelMedium.copy(fontFamily = AppFontFamily),
+        labelSmall = t.labelSmall.copy(fontFamily = AppFontFamily),
+    )
+}
+
 enum class AppThemeMode { SYSTEM, DARK, LIGHT }
 
 @Composable
@@ -122,6 +143,7 @@ fun PocketTheme(themeMode: AppThemeMode = AppThemeMode.LIGHT, content: @Composab
 
     MaterialTheme(
         colorScheme = if (isDark) DarkColors else LightColors,
+        typography = AppTypography,
         content = content,
     )
 }
