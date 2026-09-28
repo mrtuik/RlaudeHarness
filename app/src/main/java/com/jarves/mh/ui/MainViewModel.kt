@@ -2280,7 +2280,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     output.write(buffer, 0, count)
                                 }
                             }
-                            if (entry.time > 0) target.setLastModified(entry.time)
                         }
                         zip.closeEntry()
                     }
