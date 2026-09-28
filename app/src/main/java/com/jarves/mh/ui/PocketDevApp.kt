@@ -185,7 +185,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -4063,7 +4062,7 @@ private fun ImportSourceButton(
     modifier: Modifier = Modifier,
     shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(0.dp),
     onClick: () -> Unit,
-) = ImportSourceButton(rememberVectorPainter(icon), title, enabled, loading, modifier, shape, onClick)
+) = ImportSourceButton(rememberTuikPainter(icon), title, enabled, loading, modifier, shape, onClick)
 
 @Composable
 private fun ApiStatusChip(state: AppUiState, onSettings: () -> Unit, onPing: () -> Unit) {
