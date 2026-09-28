@@ -1,20 +1,30 @@
 <div align="center">
 
-  <img src="assets/readme/logo.svg" alt="Rlaude Harness Logo" width="104" height="104" style="border-radius: 24px;" />
-
   # Rlaude Harness
 
   ### *Code. Build. Ship. — an AI coding workspace that lives on your phone.*
 
   **Chat with coding agents, edit projects, run real Linux commands, preview web apps, and build Android APKs — all on-device, no PC needed.**
 
+  <sub>Created & maintained by <a href="https://github.com/mrtuik"><b>Tuik (@mrtuik)</b></a> · Forked from <a href="https://github.com/techjarves/Mobile-Harness">Mobile Harness</a> by Tech Jarves</sub>
+
+  <br />
+
+  <table>
+    <tr>
+      <td align="center" width="25%"><img src="assets/readme/rlaude-projects.png" width="100%" alt="Projects" /><br /><sub>Projects</sub></td>
+      <td align="center" width="25%"><img src="assets/readme/rlaude-chat.png" width="100%" alt="Agent chat" /><br /><sub>Agent chat</sub></td>
+      <td align="center" width="25%"><img src="assets/readme/rlaude-agent.png" width="100%" alt="AI Agent" /><br /><sub>AI Agent</sub></td>
+      <td align="center" width="25%"><img src="assets/readme/rlaude-settings.png" width="100%" alt="Settings" /><br /><sub>Settings</sub></td>
+    </tr>
+  </table>
+
   <br />
 
   [![Android 9+](https://img.shields.io/badge/Android-9%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#system-requirements)
   [![ARM64](https://img.shields.io/badge/CPU-ARM64-5B8DEF?style=flat-square)](#system-requirements)
   [![Kotlin + Compose](https://img.shields.io/badge/Kotlin-Jetpack_Compose-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](#architecture)
-  [![MIT License](https://img.shields.io/badge/License-MIT-8B7CF6?style=flat-square&logo=opensourceinitiative&logoColor=white)](LICENSE)
-  [![Built on Mobile Harness](https://img.shields.io/badge/Built_on-Mobile_Harness_by_Tech_Jarves-F28C52?style=flat-square&logo=github&logoColor=white)](https://github.com/techjarves/Mobile-Harness)
+  [![MIT License](https://img.shields.io/badge/License-MIT-8B7CF6?style=flat-square)](LICENSE)
 
   <br />
 
@@ -32,7 +42,7 @@
 ---
 
 > [!NOTE]
-> **Credit where it's due.** Rlaude Harness is a fork of **[Mobile Harness](https://github.com/techjarves/Mobile-Harness)** created by **[Tech Jarves](https://www.youtube.com/techjarves)**. The PRoot/Ubuntu runtime, the C++ process bridge, the agent bridges, and the original app foundation are his work, released under the MIT License. Huge thanks to Tech Jarves for building it and open-sourcing it. Please check out the [original project](https://github.com/techjarves/Mobile-Harness) and his [YouTube channel](https://www.youtube.com/techjarves).
+> **Rlaude Harness is built by [Tuik (@mrtuik)](https://github.com/mrtuik).** It started from the open-source **[Mobile Harness](https://github.com/techjarves/Mobile-Harness)** by Tech Jarves (PRoot/Ubuntu runtime, C++ bridge, original foundation, MIT). Everything under [What's New in Rlaude](#whats-new-in-rlaude) — shared lessons, plan mode, subagents, screen map, symbol index, providers, the whole redesigned UI — is Tuik's work.
 
 > [!IMPORTANT]
 > **Environment security notice.** Rlaude Harness runs on **ARM64 Android devices** using a private userspace PRoot layer. PRoot is not a virtualization boundary or a hardened security jail. Only run projects and dependencies you own or trust.
@@ -107,25 +117,6 @@ Install             : allow "Install unknown apps" for your browser / file manag
 ```
 
 > Two flavors exist: **online** (small APK, runtime bundles are downloaded when needed) and **offline** (bundles embedded). The workflow builds the online flavor.
-
-<br />
-
-## Workspace Interface
-
-> Screenshots below come from the upstream Mobile Harness. Rlaude's colors, icons, font, and settings layout differ.
-
-<table>
-  <tr>
-    <th width="33%" align="center">Projects</th>
-    <th width="33%" align="center">Terminal</th>
-    <th width="33%" align="center">Settings</th>
-  </tr>
-  <tr>
-    <td align="center" valign="top"><img src="assets/readme/projects.png" alt="Projects workspace overview" width="100%" /></td>
-    <td align="center" valign="top"><img src="assets/readme/terminal.png" alt="Linux terminal execution" width="100%" /></td>
-    <td align="center" valign="top"><img src="assets/readme/settings.png" alt="Runtime and provider configuration" width="100%" /></td>
-  </tr>
-</table>
 
 <br />
 
@@ -290,7 +281,8 @@ See [PRIVACY.md](PRIVACY.md).
 
 ## Credits
 
-* **[Tech Jarves](https://www.youtube.com/techjarves)** — creator of **[Mobile Harness](https://github.com/techjarves/Mobile-Harness)**, the project Rlaude Harness is built on. Runtime, native bridge, and core app architecture are his work.
+* **[Tuik (@mrtuik)](https://github.com/mrtuik)** — creator and maintainer of **Rlaude Harness**: all features listed under *What's New in Rlaude*, UI redesign, agent memory system, and release workflow.
+* **[Tech Jarves](https://www.youtube.com/techjarves)** — creator of **[Mobile Harness](https://github.com/techjarves/Mobile-Harness)**, the open-source project Rlaude Harness started from. PRoot/Ubuntu runtime, native bridge, and original app foundation (MIT).
 * **[Termux](https://github.com/termux)** — PRoot and libandroid-shmem sources.
 * **Anthropic, Google, DeepSeek** — Claude Code, Antigravity CLI, and DeepSeek Harness, each under their own licenses.
 * **Space Grotesk** font — Florian Karsten (SIL Open Font License).
@@ -303,12 +295,12 @@ See [PRIVACY.md](PRIVACY.md).
 
 ## License
 
-Licensed under the [MIT License](LICENSE). Third-party binaries and packages keep their own upstream licenses.
+Licensed under the [MIT License](LICENSE). The original Mobile Harness copyright notice is kept in the `LICENSE` file as the MIT License requires. Third-party binaries and packages keep their own upstream licenses.
 
 <br />
 
 ---
 
 <div align="center">
-  <sub>Rlaude Harness by <b>Tuik</b> · Built on Mobile Harness by <a href="https://github.com/techjarves/Mobile-Harness">Tech Jarves</a></sub>
+  <sub>Rlaude Harness by <b><a href="https://github.com/mrtuik">Tuik</a></b> · Built on Mobile Harness by <a href="https://github.com/techjarves/Mobile-Harness">Tech Jarves</a></sub>
 </div>
