@@ -7,6 +7,15 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.IntSize
 import com.jarves.mh.R
+import com.airbnb.lottie.LottieProperty
+import com.airbnb.lottie.SimpleColorFilter
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.LottieConstants
+import com.airbnb.lottie.compose.rememberLottieComposition
+import com.airbnb.lottie.compose.rememberLottieDynamicProperties
+import com.airbnb.lottie.compose.rememberLottieDynamicProperty
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.material.icons.outlined.Add as AddOutlined
 import androidx.compose.material.icons.outlined.Description as DescriptionOutlined
 import androidx.compose.material.icons.outlined.Folder as FolderOutlined
@@ -6538,17 +6547,6 @@ private fun ChatTab(
                             )
                         }
                     }
-                    if (isRunning) {
-                        item(key = "running-rabbit-indicator") {
-                            RunningRabbitIndicator(
-                                isRunning = isRunning,
-                                streamingLength = messages.lastOrNull()?.takeIf { !it.fromUser }?.text?.length ?: 0,
-                                processItems = liveProcess,
-                                startedAtMillis = taskStartedAtMillis,
-                                agentKind = agentKind,
-                            )
-                        }
-                    }
                     approval?.let { request -> item { ApprovalCard(request, onApproval) } }
                     if (pipelinePlan != null && pipelineStage == PipelineStage.AWAITING_APPROVAL) {
                         item(key = "pipeline-approve-card") {
@@ -8695,6 +8693,31 @@ private fun ActivitySubRow(
     }
 }
 
+/** Size of the small "thinking" Lottie shown before the activity text. Change this to resize. */
+private val THINKING_LOTTIE_SIZE = 20.dp
+
+@Composable
+private fun ThinkingLottie(
+    modifier: Modifier = Modifier,
+    size: Dp = THINKING_LOTTIE_SIZE,
+    color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.loading_12))
+    val dynamicProperties = rememberLottieDynamicProperties(
+        rememberLottieDynamicProperty(
+            property = LottieProperty.COLOR_FILTER,
+            value = SimpleColorFilter(color.toArgb()),
+            keyPath = arrayOf("**"),
+        ),
+    )
+    LottieAnimation(
+        composition = composition,
+        iterations = LottieConstants.IterateForever,
+        dynamicProperties = dynamicProperties,
+        modifier = modifier.size(size),
+    )
+}
+
 @Composable
 private fun AnimatedThinkingDots(
     modifier: Modifier = Modifier,
@@ -8842,6 +8865,10 @@ private fun ActivitySummaryRow(
             .padding(horizontal = 6.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (showProgress) {
+            ThinkingLottie(size = THINKING_LOTTIE_SIZE, color = muted)
+            Spacer(Modifier.width(6.dp))
+        }
         Text(
             text,
             Modifier.weight(1f, fill = false),
@@ -8851,10 +8878,6 @@ private fun ActivitySummaryRow(
             overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.width(4.dp))
-        if (showProgress) {
-            AnimatedThinkingDots(dotColor = muted)
-            Spacer(Modifier.width(4.dp))
-        }
         Icon(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
             if (expanded) "Collapse activity" else "Expand activity",
