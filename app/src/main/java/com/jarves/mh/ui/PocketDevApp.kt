@@ -6454,6 +6454,9 @@ private fun ChatTab(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     itemsIndexed(displayMessages, key = { _, message -> message.id }) { index, message ->
+                      // Work row, zip card and reply text are parts of ONE lazy item, so the list's
+                      // spacedBy() gap does not apply between them: give them the same gap here.
+                      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (message.workItems.isNotEmpty()) {
                             WorkBlockCard(message, projectSlug, onOpenFiles, onDownloadZip, onOpenChangedFile)
                         }
@@ -6512,6 +6515,7 @@ private fun ChatTab(
                                 canEdit = !isRunning && !readOnly,
                             )
                         }
+                      }
                     }
                     if (liveProcess.isNotEmpty() || thinkingActive) {
                         item(key = "live-claude-process") {
@@ -8174,8 +8178,8 @@ private fun NarrationText(text: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 12.dp, end = 8.dp),
-        fontSize = 15.sp,
-        lineHeight = 21.sp,
+        fontSize = 17.sp,
+        lineHeight = 24.sp,
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -8264,33 +8268,33 @@ private fun ChangedFilesZipCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 3.dp)
+            .padding(horizontal = 4.dp, vertical = 6.dp)
             .clip(cardShape)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, cardShape)
             .background(Color.White)
             .clickable { showSheet = true }
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .size(46.dp)
+                .clip(RoundedCornerShape(10.dp))
                 .background(Color(0xFFF3EFE8)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_custom_zip),
                 contentDescription = null,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(24.dp),
                 tint = Color.Black,
             )
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 text = zipName,
-                fontSize = 15.sp,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.Medium,
                 color = Color.Black,
                 maxLines = 1,
@@ -8298,7 +8302,7 @@ private fun ChangedFilesZipCard(
             )
             Text(
                 text = countLabel,
-                fontSize = 12.sp,
+                fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -8327,7 +8331,7 @@ private fun ChangedFilesZipCard(
                     Column(Modifier.weight(1f)) {
                         Text(
                             text = zipName,
-                            fontSize = 17.sp,
+                            fontSize = 19.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.Black,
                             maxLines = 1,
@@ -8335,7 +8339,7 @@ private fun ChangedFilesZipCard(
                         )
                         Text(
                             text = countLabel,
-                            fontSize = 12.sp,
+                            fontSize = 14.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -8685,49 +8689,189 @@ private fun ClaudeActivityDisclosure(
     headline: String,
     isRunning: Boolean = false,
 ) {
-    var expandedGroups by rememberSaveable { mutableStateOf(emptyList<Int>()) }
-    var expandedItems by rememberSaveable { mutableStateOf(emptyList<Int>()) }
+    // Tapping any activity row opens the Claude-style "Summary" bottom sheet that lists
+    // every thought + tool call of the turn in one timeline (nothing is truncated inline).
+    var showSummary by rememberSaveable { mutableStateOf(false) }
     val groups = remember(items) { buildActivityGroups(items) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)) {
         if (items.isEmpty()) {
             ActivitySummaryRow(
                 text = headline,
-                expanded = 0 in expandedGroups,
+                expanded = false,
                 showProgress = isRunning,
-                onToggle = {
-                    expandedGroups = if (0 in expandedGroups) expandedGroups - 0 else expandedGroups + 0
-                },
+                onToggle = { showSummary = true },
             )
-            if (0 in expandedGroups) ActivityExpandedDetail(null, "Reviewing the request and planning the next action.")
         } else {
             val activeKey = groups.lastOrNull()?.items?.first()?.index
             groups.forEach { group ->
                 val key = group.items.first().index
-                val open = key in expandedGroups
                 ActivitySummaryRow(
                     text = groupLabel(group),
-                    expanded = open,
+                    expanded = false,
                     showProgress = isRunning && key == activeKey,
-                    onToggle = {
-                        expandedGroups = if (key in expandedGroups) expandedGroups - key else expandedGroups + key
-                    },
+                    onToggle = { showSummary = true },
                 )
-                if (open) {
-                    if (group.kind == ActivityKind.OTHER) {
-                        val item = group.items.first().value
-                        ActivityExpandedDetail(item, activityDetail(item))
-                    } else {
-                        group.items.forEach { (index, item) ->
-                            ActivitySubRow(
-                                item = item,
-                                expanded = index in expandedItems,
-                                onToggle = {
-                                    expandedItems = if (index in expandedItems) expandedItems - index else expandedItems + index
-                                },
-                            )
-                            if (index in expandedItems) ActivityExpandedDetail(item, activityDetail(item))
-                        }
-                    }
+            }
+        }
+    }
+    if (showSummary) {
+        ActivitySummarySheet(
+            items = items,
+            isRunning = isRunning,
+            onDismiss = { showSummary = false },
+        )
+    }
+}
+
+/**
+ * Claude-style "Summary" bottom sheet: a vertical timeline of everything the agent did this turn.
+ * Thinking steps are a dot + serif text; tool calls get a boxed icon + bold title and can be
+ * tapped to reveal the full command / detail.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ActivitySummarySheet(
+    items: List<ActivityItem>,
+    isRunning: Boolean,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val entries = remember(items) {
+        items.withIndex().filter { !it.value.title.trim().equals("Files changed", ignoreCase = true) }
+    }
+    var expandedItems by rememberSaveable { mutableStateOf(emptyList<Int>()) }
+    val scroll = rememberScrollState()
+    // While the agent is still working keep the newest step in view.
+    LaunchedEffect(entries.size, isRunning) {
+        if (isRunning) scroll.animateScrollTo(scroll.maxValue)
+    }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color.White,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = Color(0xFFB0B0B0)) },
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
+            Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+                IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterStart)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Black)
+                }
+                Text(
+                    "Summary",
+                    modifier = Modifier.align(Alignment.Center),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.Black,
+                )
+            }
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(scroll)
+                    .padding(start = 16.dp, end = 20.dp, top = 12.dp)
+                    .navigationBarsPadding()
+                    .padding(bottom = 32.dp),
+            ) {
+                if (entries.isEmpty()) {
+                    Text(
+                        "Reviewing the request and planning the next action.",
+                        modifier = Modifier.padding(start = 48.dp, top = 8.dp),
+                        fontSize = 17.sp,
+                        lineHeight = 26.sp,
+                        fontFamily = FontFamily.Serif,
+                        color = Color(0xFF3D3D3A),
+                    )
+                }
+                entries.forEachIndexed { pos, (index, item) ->
+                    SummaryTimelineEntry(
+                        item = item,
+                        isFirst = pos == 0,
+                        isLast = pos == entries.lastIndex,
+                        expanded = index in expandedItems,
+                        onToggle = {
+                            expandedItems = if (index in expandedItems) expandedItems - index else expandedItems + index
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryTimelineEntry(
+    item: ActivityItem,
+    isFirst: Boolean,
+    isLast: Boolean,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    val lineColor = Color(0xFFE3E1DB)
+    val isThought = isThinkItem(item)
+    val railWidth = 40.dp
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .drawBehind {
+                val x = railWidth.toPx() / 2f
+                val top = if (isFirst) 22.dp.toPx() else 0f
+                val bottom = if (isLast) 22.dp.toPx() else size.height
+                drawLine(lineColor, Offset(x, top), Offset(x, bottom), strokeWidth = 1.5.dp.toPx())
+            },
+    ) {
+        Box(Modifier.width(railWidth).padding(top = if (isThought) 14.dp else 6.dp), contentAlignment = Alignment.TopCenter) {
+            if (isThought) {
+                Box(
+                    Modifier
+                        .padding(top = 6.dp)
+                        .size(12.dp)
+                        .background(Color(0xFFD9D7D0), CircleShape),
+                )
+            } else {
+                val boxShape = RoundedCornerShape(10.dp)
+                Box(
+                    Modifier
+                        .size(32.dp)
+                        .clip(boxShape)
+                        .background(Color.White)
+                        .border(1.dp, Color(0xFFD9D7D0), boxShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(activityIcon(item), null, Modifier.size(18.dp), tint = Color(0xFF3D3D3A))
+                }
+            }
+        }
+        Column(
+            Modifier
+                .weight(1f)
+                .clickable(onClick = onToggle)
+                .padding(start = 12.dp, top = 8.dp, bottom = 10.dp),
+        ) {
+            if (isThought) {
+                Text(
+                    activityDetail(item).replace(Regex("\\s+"), " ").trim(),
+                    fontSize = 17.sp,
+                    lineHeight = 26.sp,
+                    fontFamily = FontFamily.Serif,
+                    color = Color(0xFF3D3D3A),
+                )
+            } else {
+                Text(
+                    compactActivityText(item),
+                    modifier = Modifier.padding(top = 4.dp),
+                    fontSize = 17.sp,
+                    lineHeight = 24.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.Black,
+                    maxLines = if (expanded) Int.MAX_VALUE else 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (expanded) {
+                    Spacer(Modifier.height(4.dp))
+                    ActivityExpandedDetail(item, activityDetail(item), startPadding = 0.dp)
                 }
             }
         }
@@ -8931,7 +9075,7 @@ private fun ActivitySummaryRow(
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onToggle)
-            .padding(horizontal = 6.dp, vertical = 9.dp),
+            .padding(horizontal = 6.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (showProgress) {
@@ -8947,7 +9091,7 @@ private fun ActivitySummaryRow(
         ) { label ->
             Text(
                 label,
-                fontSize = 15.sp,
+                fontSize = 17.sp,
                 color = muted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -8957,7 +9101,7 @@ private fun ActivitySummaryRow(
         Icon(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
             if (expanded) "Collapse activity" else "Expand activity",
-            Modifier.size(18.dp).rotate(chevronRotation),
+            Modifier.size(20.dp).rotate(chevronRotation),
             tint = muted,
         )
     }
@@ -8986,7 +9130,7 @@ private fun activityIcon(item: ActivityItem?): ImageVector {
 }
 
 @Composable
-private fun ActivityExpandedDetail(item: ActivityItem?, detail: String) {
+private fun ActivityExpandedDetail(item: ActivityItem?, detail: String, startPadding: Dp = 25.dp) {
     if (item?.readVersionTag != null) {
         val scopeSuffix = if (item.contextLabel == "Work" && !item.archiveName.isNullOrBlank()) {
             " · ${item.archiveName}"
@@ -8997,8 +9141,8 @@ private fun ActivityExpandedDetail(item: ActivityItem?, detail: String) {
             text = "🗂 ${item.contextLabel ?: "Root"}$scopeSuffix · read ${item.readVersionTag} → write ${item.writeVersionTag}",
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 25.dp, end = 8.dp, bottom = 4.dp),
-            fontSize = 11.5.sp,
+                .padding(start = startPadding, end = 8.dp, bottom = 4.dp),
+            fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -9007,9 +9151,9 @@ private fun ActivityExpandedDetail(item: ActivityItem?, detail: String) {
             detail,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 25.dp, end = 8.dp, bottom = 8.dp),
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
+                .padding(start = startPadding, end = 8.dp, bottom = 8.dp),
+            fontSize = 14.5.sp,
+            lineHeight = 20.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontFamily = FontFamily.Monospace,
         )
@@ -9018,7 +9162,7 @@ private fun ActivityExpandedDetail(item: ActivityItem?, detail: String) {
             markdown = detail,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 25.dp, end = 8.dp, bottom = 8.dp),
+                .padding(start = startPadding, end = 8.dp, bottom = 8.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
