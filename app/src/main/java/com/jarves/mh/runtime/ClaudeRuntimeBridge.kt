@@ -476,6 +476,22 @@ class ClaudeRuntimeBridge(
             "system" -> when (json.optString("subtype")) {
                 "init" -> Unit
                 "thinking_tokens" -> emitReasoningProgress(sessionId, json.optInt("estimated_tokens"))
+                "api_retry" -> {
+                    // Auth/quota failures are handled by ProviderRuntimeErrorDetector; everything
+                    // else is the CLI retrying a dropped connection - say so instead of freezing.
+                    if (json.optInt("error_status") !in listOf(401, 403, 429)) {
+                        val attempt = json.optInt("attempt", 1)
+                        val max = json.optInt("max_retries", 0)
+                        eventBus.emit(
+                            RuntimeEvent.RuntimeLog(
+                                sessionId,
+                                "Network problem",
+                                if (max > 0) "Connection lost. Retrying (attempt $attempt of $max)"
+                                else "Connection lost. Retrying (attempt $attempt)",
+                            ),
+                        )
+                    }
+                }
                 "permission_denied" -> eventBus.emit(
                     RuntimeEvent.RuntimeLog(
                         sessionId,

@@ -86,9 +86,9 @@ fun MarkdownText(
                     Text(
                         text = formatInlineMarkdown(block.text),
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 15.sp,
-                            lineHeight = 23.sp,
-                            fontFamily = com.jarves.mh.ui.theme.ChatFontFamily,
+                            fontSize = 17.sp,
+                            lineHeight = 27.sp,
+                            fontFamily = FontFamily.Serif,
                         ),
                         color = color,
                     )
@@ -101,9 +101,9 @@ fun MarkdownText(
 @Composable
 private fun HeaderBlock(header: MarkdownBlock.Header) {
     val style = when (header.level) {
-        1 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold, fontSize = 25.sp, fontFamily = com.jarves.mh.ui.theme.ChatFontFamily)
-        2 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 21.sp, fontFamily = com.jarves.mh.ui.theme.ChatFontFamily)
-        else -> MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 18.sp, fontFamily = com.jarves.mh.ui.theme.ChatFontFamily)
+        1 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold, fontSize = 25.sp, fontFamily = FontFamily.Serif)
+        2 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 21.sp, fontFamily = FontFamily.Serif)
+        else -> MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 18.sp, fontFamily = FontFamily.Serif)
     }
     Text(
         text = formatInlineMarkdown(header.text),
@@ -130,9 +130,9 @@ private fun BulletBlock(item: MarkdownBlock.BulletItem, color: Color) {
         Text(
             text = formatInlineMarkdown(item.text),
             style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 15.sp,
-                lineHeight = 23.sp,
-                fontFamily = com.jarves.mh.ui.theme.ChatFontFamily,
+                fontSize = 17.sp,
+                lineHeight = 27.sp,
+                fontFamily = FontFamily.Serif,
             ),
             color = color,
             modifier = Modifier.weight(1f),
@@ -149,10 +149,10 @@ private fun NumberedBlock(item: MarkdownBlock.NumberedItem, color: Color) {
         Text(
             text = item.number,
             style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 15.sp,
-                lineHeight = 23.sp,
+                fontSize = 17.sp,
+                lineHeight = 27.sp,
                 fontWeight = FontWeight.SemiBold,
-                fontFamily = com.jarves.mh.ui.theme.ChatFontFamily,
+                fontFamily = FontFamily.Serif,
                 color = MaterialTheme.colorScheme.primary,
             ),
             modifier = Modifier.padding(end = 6.dp),
@@ -160,9 +160,9 @@ private fun NumberedBlock(item: MarkdownBlock.NumberedItem, color: Color) {
         Text(
             text = formatInlineMarkdown(item.text),
             style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 15.sp,
-                lineHeight = 23.sp,
-                fontFamily = com.jarves.mh.ui.theme.ChatFontFamily,
+                fontSize = 17.sp,
+                lineHeight = 27.sp,
+                fontFamily = FontFamily.Serif,
             ),
             color = color,
             modifier = Modifier.weight(1f),
@@ -190,10 +190,10 @@ private fun QuoteBlock(quote: MarkdownBlock.BlockQuote) {
         Text(
             text = formatInlineMarkdown(quote.text),
             style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 15.sp,
-                lineHeight = 23.sp,
+                fontSize = 17.sp,
+                lineHeight = 27.sp,
                 fontStyle = FontStyle.Italic,
-                fontFamily = com.jarves.mh.ui.theme.ChatFontFamily,
+                fontFamily = FontFamily.Serif,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             ),
         )

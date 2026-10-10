@@ -6458,7 +6458,8 @@ private fun ChatTab(
                       // spacedBy() gap does not apply between them: give them the same gap here.
                       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (message.workItems.isNotEmpty()) {
-                            WorkBlockCard(message, projectSlug, onOpenFiles, onDownloadZip, onOpenChangedFile)
+                            val turnTimeline = remember(displayMessages, index) { buildTurnTimeline(displayMessages, index) }
+                            WorkBlockCard(message, turnTimeline, projectSlug, onOpenFiles, onDownloadZip, onOpenChangedFile)
                         }
                         // One zip of everything changed in the turn: shown after all the work and
                         // right before the final reply text (never separate per-file cards).
@@ -6519,8 +6520,14 @@ private fun ChatTab(
                     }
                     if (liveProcess.isNotEmpty() || thinkingActive) {
                         item(key = "live-claude-process") {
+                            val earlier = run {
+                                val lastUser = displayMessages.indexOfLast { it.fromUser }
+                                if (lastUser < 0 || lastUser == displayMessages.lastIndex) emptyList()
+                                else buildTurnTimeline(displayMessages, displayMessages.lastIndex, turnFinished = false)
+                            }
                             LiveClaudeProcess(
                                 processItems = liveProcess,
+                                earlierSteps = earlier,
                                 isRunning = isRunning,
                                 startedAtMillis = taskStartedAtMillis,
                                 finishedAtMillis = taskFinishedAtMillis,
@@ -8130,6 +8137,7 @@ private fun ImageAttachmentBottomSheet(
 @Composable
 private fun LiveClaudeProcess(
     processItems: List<ActivityItem>,
+    earlierSteps: List<ActivityItem> = emptyList(),
     isRunning: Boolean,
     startedAtMillis: Long?,
     finishedAtMillis: Long?,
@@ -8140,6 +8148,7 @@ private fun LiveClaudeProcess(
         items = processItems,
         headline = activityHeadline(processItems, elapsedSeconds, thinkingActive),
         isRunning = isRunning,
+        sheetItems = earlierSteps + processItems,
     )
 }
 
@@ -8179,15 +8188,17 @@ private fun NarrationText(text: String) {
             .fillMaxWidth()
             .padding(start = 12.dp, end = 8.dp),
         fontSize = 17.sp,
-        lineHeight = 24.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        lineHeight = 27.sp,
+        fontFamily = FontFamily.Serif,
+        fontWeight = FontWeight.Normal,
+        color = MaterialTheme.colorScheme.onSurface,
     )
 }
 
 @Composable
 private fun WorkBlockCard(
     message: ChatMessage,
+    turnTimeline: List<ActivityItem> = message.workItems,
     projectSlug: String = "project",
     onOpenFiles: () -> Unit = {},
     onDownloadZip: (List<String>, String) -> Unit = { _, _ -> },
@@ -8198,6 +8209,7 @@ private fun WorkBlockCard(
         ClaudeActivityDisclosure(
             items = message.workItems,
             headline = activityHeadline(message.workItems, seconds, message.workItems.isEmpty()),
+            sheetItems = turnTimeline,
         )
         if (message.workItems.lastOrNull()?.title?.startsWith("Task stopped") == true) {
             Text(
@@ -8688,6 +8700,7 @@ private fun ClaudeActivityDisclosure(
     items: List<ActivityItem>,
     headline: String,
     isRunning: Boolean = false,
+    sheetItems: List<ActivityItem> = items,
 ) {
     // Tapping any activity row opens the Claude-style "Summary" bottom sheet that lists
     // every thought + tool call of the turn in one timeline (nothing is truncated inline).
@@ -8716,7 +8729,7 @@ private fun ClaudeActivityDisclosure(
     }
     if (showSummary) {
         ActivitySummarySheet(
-            items = items,
+            items = sheetItems,
             isRunning = isRunning,
             onDismiss = { showSummary = false },
         )
@@ -8735,7 +8748,8 @@ private fun ActivitySummarySheet(
     isRunning: Boolean,
     onDismiss: () -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // Opens half-way; drag it up to see the whole timeline.
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val entries = remember(items) {
         items.withIndex().filter { !it.value.title.trim().equals("Files changed", ignoreCase = true) }
     }
@@ -8853,17 +8867,17 @@ private fun SummaryTimelineEntry(
             if (isThought) {
                 Text(
                     activityDetail(item).replace(Regex("\\s+"), " ").trim(),
-                    fontSize = 17.sp,
-                    lineHeight = 26.sp,
+                    fontSize = 18.sp,
+                    lineHeight = 28.sp,
                     fontFamily = FontFamily.Serif,
                     color = Color(0xFF3D3D3A),
                 )
             } else {
                 Text(
-                    compactActivityText(item),
+                    stepTitle(item),
                     modifier = Modifier.padding(top = 4.dp),
-                    fontSize = 17.sp,
-                    lineHeight = 24.sp,
+                    fontSize = 18.sp,
+                    lineHeight = 26.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.Black,
                     maxLines = if (expanded) Int.MAX_VALUE else 3,
@@ -9166,6 +9180,49 @@ private fun ActivityExpandedDetail(item: ActivityItem?, detail: String, startPad
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/** File / pattern part of a tool item's detail ("Write · /a/b/c.html" -> "c.html"). */
+private fun stepTarget(item: ActivityItem): String {
+    val raw = item.detail.trim().trim('`').replace(Regex("\\s+"), " ")
+    val tail = if (raw.contains(" · ")) raw.substringAfter(" · ").trim() else raw
+    return tail.substringAfterLast('/').ifBlank { tail }
+}
+
+/** What the agent actually did, in plain tool-call words: "Read index.html", "Edited style.css"... */
+private fun stepTitle(item: ActivityItem): String {
+    val target = stepTarget(item).take(120)
+    return when {
+        isWriteToolName(item.title) -> "Edited $target".trim()
+        isReadItem(item) -> "Read $target".trim()
+        isSearchItem(item) -> "Searched $target".trim()
+        isWebItem(item) -> "Searched the web for $target".trim()
+        isCommandItem(item) -> "Ran ${item.detail.trim().trim('`').lineSequence().firstOrNull().orEmpty().take(140)}".trim()
+        else -> compactActivityText(item)
+    }
+}
+
+/**
+ * Everything the agent did in the turn that message [index] belongs to, in order: thinking /
+ * narration text and every tool call, so the Summary sheet shows the whole run.
+ */
+private fun buildTurnTimeline(messages: List<ChatMessage>, index: Int, turnFinished: Boolean = true): List<ActivityItem> {
+    if (index !in messages.indices) return emptyList()
+    var start = index
+    while (start > 0 && !messages[start - 1].fromUser) start--
+    var end = index
+    while (end + 1 < messages.size && !messages[end + 1].fromUser) end++
+    val out = mutableListOf<ActivityItem>()
+    for (i in start..end) {
+        val m = messages[i]
+        if (m.fromUser) continue
+        out += m.workItems.filter { !it.title.trim().equals("Files changed", ignoreCase = true) }
+        val isFinalReply = turnFinished && i == end
+        if (!isFinalReply && m.text.isNotBlank()) {
+            out += ActivityItem("Think", stripEmojis(m.text).replace("**", "").trim())
+        }
+    }
+    return out
 }
 
 private fun compactActivityText(item: ActivityItem): String = "${activityName(item)} · ${activityDetail(item).replace(Regex("\\s+"), " ").take(105)}"

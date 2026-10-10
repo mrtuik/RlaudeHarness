@@ -323,6 +323,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile private var lastOpenedAntigravityAuthUrl: String? = null
     private var activeRuntimeRequest: RuntimeRetryRequest? = null
     private val failedApiKeyIds = mutableSetOf<String>()
+    private var networkRetryCount = 0
+    private var networkRetryBypass = false
     private val transcriptWrites = Channel<TranscriptWrite>(Channel.UNLIMITED)
     private val initialAgentKind = AgentKind.fromStored(preferences.agentKind)
     private val initialPrimaryAgentKind = preferences.primaryAgentKind
@@ -3807,6 +3809,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * behind the same RuntimeBridge/activeRuntime()) get the pipeline without per-agent code. */
     private fun launchRuntimeSession(project: Project, prompt: String, history: List<ChatMessage> = state.value.messages) {
         failedApiKeyIds.clear()
+        networkRetryCount = 0
         activeRuntimeRequest = RuntimeRetryRequest(
             runtime = activeRuntime(),
             project = project,
@@ -4284,6 +4287,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             antigravityAuthController.invalidateSession(event.reason)
         }
         if (event is RuntimeEvent.SessionFailed && retryWithNextApiKey(event)) return
+        if (event is RuntimeEvent.SessionFailed && !networkRetryBypass && retryAfterNetworkProblem(event)) return
         _state.update { current ->
             if (!current.isRunning) {
                 current
@@ -4514,6 +4518,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (event is RuntimeEvent.SessionCompleted || event is RuntimeEvent.SessionFailed) {
             activeRuntimeRequest = null
             failedApiKeyIds.clear()
+            networkRetryCount = 0
         }
         if (event is RuntimeEvent.SessionCompleted && _state.value.pipelineStage != PipelineStage.IDLE) {
             advancePipelineAfterSessionCompleted()
@@ -4529,6 +4534,71 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // final results. If Android kills the process, the last displayed timeline
         // is restored as an interrupted work block rather than disappearing.
         persistMessages(includeLiveProcess = true)
+    }
+
+    /**
+     * Claude-style network handling: when a run dies because the connection dropped, show a
+     * "Network problem" step, wait a little and restart the same request automatically
+     * (up to [MAX_NETWORK_RETRIES] times) instead of leaving the chat stuck.
+     */
+    private fun retryAfterNetworkProblem(event: RuntimeEvent.SessionFailed): Boolean {
+        val current = _state.value
+        if (!current.isRunning || current.activeSessionId != event.sessionId) return false
+        if (event.reason.contains("stopped by user", true)) return false
+        if (isApiKeyFailure(event.reason) || !isNetworkFailure(event.reason)) return false
+        val request = activeRuntimeRequest ?: return false
+        if (networkRetryCount >= MAX_NETWORK_RETRIES) {
+            networkRetryBypass = true
+            try {
+                onRuntimeEvent(
+                    event.copy(reason = "Network problem. Check your connection, then send your message again."),
+                )
+            } finally {
+                networkRetryBypass = false
+            }
+            return true
+        }
+        networkRetryCount += 1
+        val attempt = networkRetryCount
+        val waitSeconds = (attempt * 3).coerceAtMost(12)
+        _state.update {
+            it.copy(
+                activeSessionId = null,
+                liveProcess = it.liveProcess.map { item -> if (!item.isComplete) item.copy(isComplete = true) else item } +
+                    ActivityItem(
+                        "Network problem",
+                        "Connection lost. Retrying in ${waitSeconds}s (attempt $attempt of $MAX_NETWORK_RETRIES)",
+                        false,
+                    ),
+                liveThinking = false,
+            )
+        }
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(waitSeconds * 1_000L)
+            // The user may have pressed stop or started something else while we waited.
+            if (!_state.value.isRunning || activeRuntimeRequest !== request) return@launch
+            request.runtime.startSession(
+                request.project.id,
+                request.project.slug,
+                request.project.kind,
+                request.prompt,
+                request.history,
+                request.provider,
+                request.project.name,
+            )
+        }
+        return true
+    }
+
+    private fun isNetworkFailure(reason: String): Boolean {
+        val value = reason.lowercase()
+        return listOf(
+            "network", "unable to connect", "connection reset", "connection closed", "connection refused",
+            "connection error", "connection lost", "econnreset", "econnrefused", "enotfound", "etimedout",
+            "eai_again", "epipe", "unknownhost", "unknown host", "timed out", "timeout", "socket",
+            "fetch failed", "stream ended", "stream closed", "terminated", "offline", "no route to host",
+            "unreachable", "http 502", "http 503", "http 504", "overloaded",
+        ).any { it in value }
     }
 
     private fun retryWithNextApiKey(event: RuntimeEvent.SessionFailed): Boolean {
@@ -4630,6 +4700,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         private const val MINIMUM_INITIALIZATION_SCREEN_MS = 3_000L
+        private const val MAX_NETWORK_RETRIES = 5
         private const val MAX_VISIBLE_WORKSPACE_ENTRIES = 2_000
         private const val MAX_PROJECT_TERMINAL_HISTORY = 100
         private const val MAX_PROJECT_TERMINAL_OUTPUT = 200_000
