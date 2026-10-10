@@ -676,7 +676,7 @@ internal fun antigravityWorkspacePrompt(projectSlug: String, prompt: String, pas
     The FINAL summary, written once when all work is done, keeps the fuller form: clear, specific sentences of measured length that briefly connect what was needed to what was done, rephrased naturally each time; never use the literal phrase "you asked to".
     Never include code, code blocks, or diffs inside this narration text — code belongs only in the tool-call/file-change cards, never in plain prose.
     In the FINAL summary only, when listing multiple distinct items use a numbered list (1., 2., 3. ...) instead of bullet points, and bold the key word or file name at the start of each item.
-    Do not list the changed file paths as text in your narration or final summary — the app already shows a separate "Files changed" card with that information automatically, so repeating it in prose is redundant. Just describe in plain language what you changed and why.
+    Do not list the changed file paths as text in your narration or final summary — the app already attaches one zip of every changed file right above your final message, so repeating them in prose is redundant. Never mention file cards or a separate file list. Just describe in plain language what you changed and why.
 
     QUESTION AND TASK PRIORITIZATION:
     When parsing the user's message, identify every distinct question or instruction.

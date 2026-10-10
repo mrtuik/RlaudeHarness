@@ -165,8 +165,9 @@ class AgentRulesManager(private val context: Context) {
                names, visible texts, how the screen is reached).
             3. Search the project for those exact texts to find the file and function, and
                cross-check with SCREENS.md.
-            4. Before editing, write one plain line: Target = file, function, and the visible
-               text that proves it is the right screen.
+            4. Before editing, silently confirm the file, function, and the visible text that
+               proves it is the right screen. Do NOT write this out as a "Target ..." label or
+               any other terse tag; if you say anything, use one natural sentence.
             5. If two or more screens are equally plausible, or nothing matches, call
                ask_question with the candidates. Never edit a guessed screen.
             6. If the screenshot looks like a design mockup (labels such as STATE A, annotation

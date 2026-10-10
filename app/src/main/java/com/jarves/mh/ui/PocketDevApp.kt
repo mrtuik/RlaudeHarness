@@ -6453,6 +6453,41 @@ private fun ChatTab(
                         if (message.workItems.isNotEmpty()) {
                             WorkBlockCard(message, projectSlug, onOpenFiles, onDownloadZip, onOpenChangedFile)
                         }
+                        // One zip of everything changed in the turn, shown after all the work and
+                        // right before the final summary (never separate per-file cards).
+                        val isTurnEnd = !message.fromUser && (
+                            (index == displayMessages.lastIndex && !isRunning) ||
+                                (index < displayMessages.lastIndex && displayMessages[index + 1].fromUser)
+                            )
+                        val turnChangedPaths = remember(displayMessages, index, isTurnEnd) {
+                            if (!isTurnEnd) {
+                                emptyList()
+                            } else {
+                                var startIdx = index
+                                while (startIdx > 0 && !displayMessages[startIdx - 1].fromUser) {
+                                    startIdx--
+                                }
+                                val hasActualWritesInTurn = (startIdx..index).any { i ->
+                                    displayMessages[i].workItems.any { isWriteToolName(it.title) }
+                                }
+                                if (!hasActualWritesInTurn) {
+                                    emptyList()
+                                } else {
+                                    val paths = mutableListOf<String>()
+                                    for (i in startIdx..index) {
+                                        paths.addAll(extractTurnChangedPaths(displayMessages[i]))
+                                    }
+                                    paths.distinct()
+                                }
+                            }
+                        }
+                        if (turnChangedPaths.isNotEmpty()) {
+                            ChangedFilesZipCard(
+                                zipName = "$projectSlug-changes",
+                                fileCount = turnChangedPaths.size,
+                                onDownload = { onDownloadZip(turnChangedPaths, "$projectSlug-changes.zip") },
+                            )
+                        }
                         // Mid-turn narration: assistant prose with no tool card of its own that is
                         // followed by more agent output in the same turn. The final reply of a turn
                         // keeps the normal bubble.
@@ -6465,7 +6500,9 @@ private fun ChatTab(
                                     (index == displayMessages.lastIndex && isRunning && (liveProcess.isNotEmpty() || thinkingActive))
                                 )
                         if (isNarration) {
-                            NarrationText(message.text)
+                            if (!Regex("^\\s*target\\b", RegexOption.IGNORE_CASE).containsMatchIn(message.text)) {
+                                NarrationText(message.text)
+                            }
                         } else if (message.text.isNotBlank() || (message.workItems.isEmpty() && message.fromUser)) {
                             MessageBubble(
                                 message = message,
@@ -6495,63 +6532,6 @@ private fun ChatTab(
                                 } else null,
                                 canEdit = !isRunning && !readOnly,
                             )
-                        }
-
-                        val isTurnEnd = !message.fromUser && (
-                            (index == displayMessages.lastIndex && !isRunning) ||
-                            (index < displayMessages.lastIndex && displayMessages[index + 1].fromUser)
-                        )
-                        if (isTurnEnd) {
-                            val turnChangedPaths = remember(displayMessages, index) {
-                                var startIdx = index
-                                while (startIdx > 0 && !displayMessages[startIdx - 1].fromUser) {
-                                    startIdx--
-                                }
-                                val hasActualWritesInTurn = (startIdx..index).any { i ->
-                                    displayMessages[i].workItems.any { isWriteToolName(it.title) }
-                                }
-                                if (!hasActualWritesInTurn) {
-                                    emptyList()
-                                } else {
-                                    val paths = mutableListOf<String>()
-                                    for (i in startIdx..index) {
-                                        val m = displayMessages[i]
-                                        paths.addAll(extractTurnChangedPaths(m))
-                                    }
-                                    paths.distinct()
-                                }
-                            }
-                            if (turnChangedPaths.isNotEmpty()) {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    turnChangedPaths.forEach { path ->
-                                        key(path) {
-                                            PerFileChangeCard(
-                                                relativePath = path,
-                                                onOpen = { onOpenChangedFile(path) },
-                                            )
-                                        }
-                                    }
-                                    Row(
-                                        modifier = Modifier
-                                            .clickable { onDownloadZip(turnChangedPaths, "$projectSlug-changes.zip") }
-                                            .padding(horizontal = 8.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(
-                                            painter = painterResource(R.drawable.ic_custom_zip),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(
-                                            "Download changed files as zip",
-                                            fontSize = 14.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
-                            }
                         }
                     }
                     if (liveProcess.isNotEmpty() || thinkingActive) {
@@ -8247,6 +8227,64 @@ private fun WorkBlockCard(
     }
 }
 
+/** One file card for the whole turn: a zip of every changed file, in its exact relative path. */
+@Composable
+private fun ChangedFilesZipCard(
+    zipName: String,
+    fileCount: Int,
+    onDownload: () -> Unit,
+) {
+    val cardShape = RoundedCornerShape(12.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 3.dp)
+            .clip(cardShape)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, cardShape)
+            .background(Color.White)
+            .clickable(onClick = onDownload)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFFF3EFE8)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_custom_zip),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = Color.Black,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = zipName,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = if (fileCount == 1) "ZIP · 1 file" else "ZIP · $fileCount files",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(
+            Icons.Default.Download,
+            contentDescription = "Download zip",
+            modifier = Modifier.size(22.dp),
+            tint = Color.Black,
+        )
+    }
+}
+
 /**
  * A single changed file rendered inline in the chat stream, right where the turn that
  * produced it ends. Replaces the old end-of-turn "Changed files (N)" bottom sheet
@@ -8499,6 +8537,8 @@ private fun activityKind(item: ActivityItem): ActivityKind = when {
 private fun buildActivityGroups(items: List<ActivityItem>): List<ActivityGroup> {
     val groups = mutableListOf<ActivityGroup>()
     items.forEachIndexed { index, item ->
+        // The single changed-files zip card replaces the old "Files changed" row.
+        if (item.title.trim().equals("Files changed", ignoreCase = true)) return@forEachIndexed
         val kind = activityKind(item)
         val last = groups.lastOrNull()
         if (last != null && kind != ActivityKind.OTHER && last.kind == kind) {
