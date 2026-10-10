@@ -66,6 +66,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
@@ -6384,8 +6385,11 @@ private fun ChatTab(
         }
     }
     val displayMessages = remember(messages) {
-        messages.filterNot { !it.fromUser && it.text.startsWith("Hi! Tell me") }
+        messages
+            .filterNot { !it.fromUser && it.text.startsWith("Hi! Tell me") }
+            .map { if (!it.fromUser && it.text.contains("LESSON")) it.copy(text = stripLessonMarkers(it.text)) else it }
     }
+    val turnZips = remember(displayMessages, isRunning) { computeTurnZips(displayMessages, isRunning) }
     val cursor = promptValue.selection.end
     val textBeforeCursor = if (cursor in 0..promptValue.text.length) promptValue.text.substring(0, cursor) else promptValue.text
     val lastAt = textBeforeCursor.lastIndexOf('@')
@@ -6453,39 +6457,14 @@ private fun ChatTab(
                         if (message.workItems.isNotEmpty()) {
                             WorkBlockCard(message, projectSlug, onOpenFiles, onDownloadZip, onOpenChangedFile)
                         }
-                        // One zip of everything changed in the turn, shown after all the work and
-                        // right before the final summary (never separate per-file cards).
-                        val isTurnEnd = !message.fromUser && (
-                            (index == displayMessages.lastIndex && !isRunning) ||
-                                (index < displayMessages.lastIndex && displayMessages[index + 1].fromUser)
-                            )
-                        val turnChangedPaths = remember(displayMessages, index, isTurnEnd) {
-                            if (!isTurnEnd) {
-                                emptyList()
-                            } else {
-                                var startIdx = index
-                                while (startIdx > 0 && !displayMessages[startIdx - 1].fromUser) {
-                                    startIdx--
-                                }
-                                val hasActualWritesInTurn = (startIdx..index).any { i ->
-                                    displayMessages[i].workItems.any { isWriteToolName(it.title) }
-                                }
-                                if (!hasActualWritesInTurn) {
-                                    emptyList()
-                                } else {
-                                    val paths = mutableListOf<String>()
-                                    for (i in startIdx..index) {
-                                        paths.addAll(extractTurnChangedPaths(displayMessages[i]))
-                                    }
-                                    paths.distinct()
-                                }
-                            }
-                        }
-                        if (turnChangedPaths.isNotEmpty()) {
+                        // One zip of everything changed in the turn: shown after all the work and
+                        // right before the final reply text (never separate per-file cards).
+                        turnZips[index]?.let { zipPaths ->
                             ChangedFilesZipCard(
                                 zipName = "$projectSlug-changes",
-                                fileCount = turnChangedPaths.size,
-                                onDownload = { onDownloadZip(turnChangedPaths, "$projectSlug-changes.zip") },
+                                paths = zipPaths,
+                                onOpenFile = onOpenChangedFile,
+                                onDownload = { onDownloadZip(zipPaths, "$projectSlug-changes.zip") },
                             )
                         }
                         // Mid-turn narration: assistant prose with no tool card of its own that is
@@ -8227,13 +8206,60 @@ private fun WorkBlockCard(
     }
 }
 
-/** One file card for the whole turn: a zip of every changed file, in its exact relative path. */
+private val LESSON_MARKER_REGEX = Regex("#{0,2}\\s*LESSON\\s*#{1,2}\\s*\\{[^\\n]*")
+
+/** Internal "##LESSON##{...}" records are for the app only; never show them in chat. */
+private fun stripLessonMarkers(text: String): String =
+    text.replace(LESSON_MARKER_REGEX, "").trimEnd()
+
+/**
+ * For every finished turn that changed files, picks the message the single zip card is shown
+ * before: the final reply text of the turn (so the zip comes first, then the explanation).
+ */
+private fun computeTurnZips(messages: List<ChatMessage>, isRunning: Boolean): Map<Int, List<String>> {
+    val result = mutableMapOf<Int, List<String>>()
+    var i = 0
+    while (i < messages.size) {
+        if (messages[i].fromUser) {
+            i++
+            continue
+        }
+        val start = i
+        var end = i
+        while (end + 1 < messages.size && !messages[end + 1].fromUser) end++
+        val turnFinished = end < messages.lastIndex || !isRunning
+        if (turnFinished) {
+            val hasWrites = (start..end).any { idx -> messages[idx].workItems.any { isWriteToolName(it.title) } }
+            if (hasWrites) {
+                val paths = (start..end).flatMap { extractTurnChangedPaths(messages[it]) }.distinct()
+                if (paths.isNotEmpty()) {
+                    val host = (start..end).lastOrNull { messages[it].text.isNotBlank() && messages[it].workedMillis > 0L }
+                        ?: (start..end).lastOrNull { messages[it].text.isNotBlank() }
+                        ?: end
+                    result[host] = paths
+                }
+            }
+        }
+        i = end + 1
+    }
+    return result
+}
+
+/**
+ * One card for the whole turn: a zip of every changed file (exact relative paths). Tapping it opens
+ * a bottom sheet listing the files inside (tap to view in the app); the three-dot menu there
+ * downloads the zip.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChangedFilesZipCard(
     zipName: String,
-    fileCount: Int,
+    paths: List<String>,
+    onOpenFile: (String) -> Unit,
     onDownload: () -> Unit,
 ) {
+    var showSheet by remember { mutableStateOf(false) }
+    val countLabel = if (paths.size == 1) "ZIP · 1 file" else "ZIP · ${paths.size} files"
     val cardShape = RoundedCornerShape(12.dp)
     Row(
         modifier = Modifier
@@ -8242,7 +8268,7 @@ private fun ChangedFilesZipCard(
             .clip(cardShape)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, cardShape)
             .background(Color.White)
-            .clickable(onClick = onDownload)
+            .clickable { showSheet = true }
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -8271,17 +8297,78 @@ private fun ChangedFilesZipCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = if (fileCount == 1) "ZIP · 1 file" else "ZIP · $fileCount files",
+                text = countLabel,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Icon(
-            Icons.Default.Download,
-            contentDescription = "Download zip",
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = "View files",
             modifier = Modifier.size(22.dp),
-            tint = Color.Black,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+
+    if (showSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showSheet = false },
+            sheetState = sheetState,
+            containerColor = Color.White,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = Color.Black) },
+            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        ) {
+            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = zipName,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.Black,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = countLabel,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    FileActionsMenu(
+                        onCopy = null,
+                        onDownload = {
+                            showSheet = false
+                            onDownload()
+                        },
+                        onShare = null,
+                    )
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 460.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp),
+                ) {
+                    paths.forEach { path ->
+                        key(path) {
+                            PerFileChangeCard(
+                                relativePath = path,
+                                onOpen = {
+                                    showSheet = false
+                                    onOpenFile(path)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -8539,7 +8626,8 @@ private fun buildActivityGroups(items: List<ActivityItem>): List<ActivityGroup> 
     items.forEachIndexed { index, item ->
         // The single changed-files zip card replaces the old "Files changed" row.
         if (item.title.trim().equals("Files changed", ignoreCase = true)) return@forEachIndexed
-        val kind = activityKind(item)
+        // Reads, searches, commands and edits that run back to back share ONE row.
+        val kind = if (activityKind(item) == ActivityKind.OTHER) ActivityKind.OTHER else ActivityKind.EXPLORE
         val last = groups.lastOrNull()
         if (last != null && kind != ActivityKind.OTHER && last.kind == kind) {
             groups[groups.lastIndex] = last.copy(items = last.items + IndexedValue(index, item))
@@ -8553,34 +8641,41 @@ private fun buildActivityGroups(items: List<ActivityItem>): List<ActivityGroup> 
 private fun plural(count: Int, singular: String, pluralForm: String = singular + "s"): String =
     "$count ${if (count == 1) singular else pluralForm}"
 
+private fun changedFileNames(items: List<ActivityItem>): List<String> = items
+    .filter { isWriteToolName(it.title) }
+    .map { it.detail.trim().trim('`').let { raw -> if (raw.contains(" · ")) raw.substringAfter(" · ").trim() else raw } }
+    .filter { it.isNotBlank() }
+    .map { it.substringAfterLast('/') }
+    .distinct()
+
+private fun editedLabel(items: List<ActivityItem>): String? {
+    val editCount = items.count { isWriteToolName(it.title) }
+    if (editCount == 0) return null
+    val names = changedFileNames(items)
+    return when {
+        names.isEmpty() -> "edited ${plural(editCount, "file")}"
+        names.size == 1 -> "edited ${names[0]}"
+        names.size == 2 -> "edited ${names[0]} and ${names[1]}"
+        names.size == 3 -> "edited ${names[0]}, ${names[1]} and ${names[2]}"
+        else -> "edited ${names.size} files"
+    }
+}
+
 private fun groupLabel(group: ActivityGroup): String {
     val items = group.items.map { it.value }
     return when (group.kind) {
-        ActivityKind.WRITE -> {
-            val names = items
-                .map { it.detail.trim().trim('`').let { raw -> if (raw.contains(" · ")) raw.substringAfter(" · ").trim() else raw } }
-                .filter { it.isNotBlank() }
-                .map { it.substringAfterLast('/') }
-                .distinct()
-            when {
-                names.isEmpty() -> "Edited ${plural(items.size.coerceAtLeast(1), "file")}"
-                names.size == 1 -> "Edited ${names[0]}"
-                names.size == 2 -> "Edited ${names[0]} and ${names[1]}"
-                names.size == 3 -> "Edited ${names[0]}, ${names[1]} and ${names[2]}"
-                else -> "Edited ${names.size} files"
-            }
-        }
-        ActivityKind.EXPLORE -> {
+        ActivityKind.OTHER -> compactActivityText(items.first())
+        else -> {
             val parts = buildList {
                 items.count(::isReadItem).takeIf { it > 0 }?.let { add("read ${plural(it, "file")}") }
                 items.count(::isSearchItem).takeIf { it > 0 }?.let { add("searched ${plural(it, "time")}") }
                 items.count(::isWebItem).takeIf { it > 0 }?.let { add("searched the web ${plural(it, "time")}") }
+                editedLabel(items)?.let { add(it) }
                 items.count(::isCommandItem).takeIf { it > 0 }?.let { add("ran ${plural(it, "command")}") }
             }
             if (parts.isEmpty()) "Thought through the request"
             else parts.joinToString(", ").replaceFirstChar { it.uppercase() }
         }
-        ActivityKind.OTHER -> compactActivityText(items.first())
     }
 }
 
@@ -8843,14 +8938,21 @@ private fun ActivitySummaryRow(
             ThinkingLottie(size = THINKING_LOTTIE_SIZE, color = muted)
             Spacer(Modifier.width(6.dp))
         }
-        Text(
-            text,
-            Modifier.weight(1f, fill = false),
-            fontSize = 15.sp,
-            color = muted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        // The label fades out and the new one fades in whenever the activity changes (Claude-style).
+        AnimatedContent(
+            targetState = text,
+            modifier = Modifier.weight(1f, fill = false),
+            transitionSpec = { fadeIn(tween(320)) togetherWith fadeOut(tween(180)) },
+            label = "activity_label",
+        ) { label ->
+            Text(
+                label,
+                fontSize = 15.sp,
+                color = muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Spacer(Modifier.width(4.dp))
         Icon(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
