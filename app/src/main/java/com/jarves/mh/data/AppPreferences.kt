@@ -379,6 +379,7 @@ class AppPreferences(private val context: Context) {
                             put("detail", item.detail)
                             put("isComplete", item.isComplete)
                             put("isCommand", item.isCommand)
+                            if (item.description.isNotBlank()) put("description", item.description)
                             item.contextLabel?.let { put("contextLabel", it) }
                             item.archiveName?.let { put("archiveName", it) }
                             item.readVersionTag?.let { put("readVersionTag", it) }
@@ -435,6 +436,7 @@ class AppPreferences(private val context: Context) {
                                     archiveName = item.optString("archiveName").ifBlank { null },
                                     readVersionTag = item.optString("readVersionTag").ifBlank { null },
                                     writeVersionTag = item.optString("writeVersionTag").ifBlank { null },
+                                    description = item.optString("description"),
                                 )
                             }
                         }.getOrNull()

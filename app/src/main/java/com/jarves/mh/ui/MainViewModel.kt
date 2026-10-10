@@ -4281,7 +4281,68 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    // Step lines: the agent writes "[[step: Tracing how the board is drawn.]]" before its tool calls.
+    // They never reach the chat; they become thought steps in the Summary sheet (Claude-style),
+    // for every runtime. A tag split across streamed chunks is held back until it is complete.
+    private val stepTagCarry = StringBuilder()
+
+    private fun extractStepTags(chunk: String): Pair<String, List<String>> {
+        val opener = "[[step:"
+        stepTagCarry.append(chunk)
+        val src = stepTagCarry.toString()
+        val steps = mutableListOf<String>()
+        val out = StringBuilder()
+        var i = 0
+        while (i < src.length) {
+            val open = src.indexOf(opener, i)
+            if (open < 0) {
+                var keep = 0
+                for (len in minOf(opener.length - 1, src.length - i) downTo 1) {
+                    if (src.endsWith(opener.substring(0, len))) { keep = len; break }
+                }
+                out.append(src, i, src.length - keep)
+                stepTagCarry.setLength(0)
+                stepTagCarry.append(src, src.length - keep, src.length)
+                return out.toString() to steps
+            }
+            out.append(src, i, open)
+            val close = src.indexOf("]]", open)
+            if (close < 0) {
+                stepTagCarry.setLength(0)
+                stepTagCarry.append(src, open, src.length)
+                return out.toString() to steps
+            }
+            steps += src.substring(open + opener.length, close).replace(Regex("\\s+"), " ").trim()
+            i = close + 2
+        }
+        stepTagCarry.setLength(0)
+        return out.toString() to steps
+    }
+
     private fun onRuntimeEvent(event: RuntimeEvent) {
+        if (event is RuntimeEvent.SessionStarted || event is RuntimeEvent.SessionCompleted || event is RuntimeEvent.SessionFailed) {
+            stepTagCarry.setLength(0)
+        }
+        if (event is RuntimeEvent.AssistantDelta) {
+            val (visible, steps) = extractStepTags(event.text)
+            steps.filter { it.isNotBlank() }.forEach { step ->
+                processRuntimeEvent(
+                    RuntimeEvent.ReasoningSummary(
+                        sessionId = event.sessionId,
+                        summary = stripEmojis(step),
+                        blockId = 0L,
+                        startsNewBlock = true,
+                        isFinal = true,
+                    ),
+                )
+            }
+            if (visible.isNotBlank()) processRuntimeEvent(RuntimeEvent.AssistantDelta(event.sessionId, visible))
+            return
+        }
+        processRuntimeEvent(event)
+    }
+
+    private fun processRuntimeEvent(event: RuntimeEvent) {
         if (event is RuntimeEvent.SessionFailed && _state.value.agentKind == AgentKind.ANTIGRAVITY &&
             (event.reason.contains("sign-in", true) || event.reason.contains("authentication", true))) {
             antigravityAuthController.invalidateSession(event.reason)
@@ -4374,7 +4435,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 is RuntimeEvent.ToolStarted -> {
-                    val baseItem = ActivityItem("Running ${event.toolName}", event.detail, false, isCommand = event.toolName == "Bash")
+                    val baseItem = ActivityItem("Running ${event.toolName}", event.detail, false, isCommand = event.toolName == "Bash", description = event.description)
                     val item = current.activeProject?.let { withVersionContext(baseItem, it) } ?: baseItem
                     val planned = current.copy(
                         liveProcess = current.liveProcess.map { i ->
@@ -4422,6 +4483,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 "${event.toolName} completed",
                                 runningItem.detail.ifBlank { event.summary },
                                 isCommand = event.toolName == "Bash",
+                                description = runningItem.description,
                                 contextLabel = runningItem.contextLabel,
                                 archiveName = runningItem.archiveName,
                                 readVersionTag = runningItem.readVersionTag,

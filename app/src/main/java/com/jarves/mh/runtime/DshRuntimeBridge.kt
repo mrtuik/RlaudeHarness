@@ -323,7 +323,15 @@ class DshRuntimeBridge(
                         )
                     } else {
                         eventBus.emit(
-                            RuntimeEvent.ToolStarted(sessionId, protocolEvent.name, protocolEvent.detail),
+                            RuntimeEvent.ToolStarted(
+                                sessionId,
+                                protocolEvent.name,
+                                protocolEvent.detail,
+                                if (protocolEvent.name == "Bash") {
+                                    runCatching { JSONObject(protocolEvent.rawArguments).optString("description") }
+                                        .getOrDefault("").replace(Regex("\\s+"), " ").trim().take(140)
+                                } else "",
+                            ),
                         )
                     }
                 }

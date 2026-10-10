@@ -320,6 +320,8 @@ sealed interface RuntimeEvent {
         override val sessionId: String,
         val toolName: String,
         val detail: String,
+        // Optional short human description of the call (Claude's Bash "description"), shown as the row title.
+        val description: String = "",
     ) : RuntimeEvent
     data class RuntimeLog(
         override val sessionId: String,
@@ -402,6 +404,8 @@ data class ActivityItem(
     val archiveName: String? = null,
     val readVersionTag: String? = null,
     val writeVersionTag: String? = null,
+    // Short human description of the tool call (e.g. a Bash command's purpose). Blank when unknown.
+    val description: String = "",
 )
 
 fun stripEmojis(input: String): String {

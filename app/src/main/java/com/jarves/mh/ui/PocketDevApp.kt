@@ -6458,8 +6458,7 @@ private fun ChatTab(
                       // spacedBy() gap does not apply between them: give them the same gap here.
                       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (message.workItems.isNotEmpty()) {
-                            val turnTimeline = remember(displayMessages, index) { buildTurnTimeline(displayMessages, index) }
-                            WorkBlockCard(message, turnTimeline, projectSlug, onOpenFiles, onDownloadZip, onOpenChangedFile)
+                            WorkBlockCard(message, projectSlug, onOpenFiles, onDownloadZip, onOpenChangedFile)
                         }
                         // One zip of everything changed in the turn: shown after all the work and
                         // right before the final reply text (never separate per-file cards).
@@ -6520,14 +6519,8 @@ private fun ChatTab(
                     }
                     if (liveProcess.isNotEmpty() || thinkingActive) {
                         item(key = "live-claude-process") {
-                            val earlier = run {
-                                val lastUser = displayMessages.indexOfLast { it.fromUser }
-                                if (lastUser < 0 || lastUser == displayMessages.lastIndex) emptyList()
-                                else buildTurnTimeline(displayMessages, displayMessages.lastIndex, turnFinished = false)
-                            }
                             LiveClaudeProcess(
                                 processItems = liveProcess,
-                                earlierSteps = earlier,
                                 isRunning = isRunning,
                                 startedAtMillis = taskStartedAtMillis,
                                 finishedAtMillis = taskFinishedAtMillis,
@@ -8137,7 +8130,6 @@ private fun ImageAttachmentBottomSheet(
 @Composable
 private fun LiveClaudeProcess(
     processItems: List<ActivityItem>,
-    earlierSteps: List<ActivityItem> = emptyList(),
     isRunning: Boolean,
     startedAtMillis: Long?,
     finishedAtMillis: Long?,
@@ -8148,7 +8140,6 @@ private fun LiveClaudeProcess(
         items = processItems,
         headline = activityHeadline(processItems, elapsedSeconds, thinkingActive),
         isRunning = isRunning,
-        sheetItems = earlierSteps + processItems,
     )
 }
 
@@ -8198,7 +8189,6 @@ private fun NarrationText(text: String) {
 @Composable
 private fun WorkBlockCard(
     message: ChatMessage,
-    turnTimeline: List<ActivityItem> = message.workItems,
     projectSlug: String = "project",
     onOpenFiles: () -> Unit = {},
     onDownloadZip: (List<String>, String) -> Unit = { _, _ -> },
@@ -8209,7 +8199,6 @@ private fun WorkBlockCard(
         ClaudeActivityDisclosure(
             items = message.workItems,
             headline = activityHeadline(message.workItems, seconds, message.workItems.isEmpty()),
-            sheetItems = turnTimeline,
         )
         if (message.workItems.lastOrNull()?.title?.startsWith("Task stopped") == true) {
             Text(
@@ -8677,11 +8666,33 @@ private fun editedLabel(items: List<ActivityItem>): String? {
     }
 }
 
+/**
+ * Claude-style row title taken from the newest thought/narration of a group, e.g.
+ * "I am matching fonts and spacing across the chat. Then..." becomes
+ * "Matching fonts and spacing across the chat". Returns null when there is no real sentence yet.
+ */
+private fun thoughtHeadline(item: ActivityItem): String? {
+    if (!isThinkItem(item)) return null
+    val clean = item.detail.replace(Regex("\\s+"), " ").trim()
+    if (clean.isBlank() ||
+        clean.contains("reasoning tokens processed", ignoreCase = true) ||
+        clean.equals("Thinking…", ignoreCase = true) ||
+        clean.equals("Thinking...", ignoreCase = true)
+    ) return null
+    val firstSentence = clean.split(Regex("(?<=[.!?])\\s+")).first().trim().trimEnd('.', '!', ':', '…')
+    val stripped = firstSentence.replace(
+        Regex("^(?:now,?\\s+)?(?:i am|i'm|i have been|i was)\\s+", RegexOption.IGNORE_CASE),
+        "",
+    )
+    return stripped.replaceFirstChar { it.uppercase() }.takeIf { it.length >= 4 }
+}
+
 private fun groupLabel(group: ActivityGroup): String {
     val items = group.items.map { it.value }
     return when (group.kind) {
         ActivityKind.OTHER -> compactActivityText(items.first())
         else -> {
+            items.asReversed().firstNotNullOfOrNull(::thoughtHeadline)?.let { return it }
             val parts = buildList {
                 items.count(::isReadItem).takeIf { it > 0 }?.let { add("read ${plural(it, "file")}") }
                 items.count(::isSearchItem).takeIf { it > 0 }?.let { add("searched ${plural(it, "time")}") }
@@ -8700,11 +8711,10 @@ private fun ClaudeActivityDisclosure(
     items: List<ActivityItem>,
     headline: String,
     isRunning: Boolean = false,
-    sheetItems: List<ActivityItem> = items,
 ) {
-    // Tapping any activity row opens the Claude-style "Summary" bottom sheet that lists
-    // every thought + tool call of the turn in one timeline (nothing is truncated inline).
-    var showSummary by rememberSaveable { mutableStateOf(false) }
+    // Every activity row opens its OWN Summary sheet, listing only the steps of that row.
+    // -1 = closed, otherwise the first item index of the tapped group.
+    var openKey by rememberSaveable { mutableStateOf(-1) }
     val groups = remember(items) { buildActivityGroups(items) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)) {
         if (items.isEmpty()) {
@@ -8712,7 +8722,7 @@ private fun ClaudeActivityDisclosure(
                 text = headline,
                 expanded = false,
                 showProgress = isRunning,
-                onToggle = { showSummary = true },
+                onToggle = { openKey = 0 },
             )
         } else {
             val activeKey = groups.lastOrNull()?.items?.first()?.index
@@ -8722,16 +8732,17 @@ private fun ClaudeActivityDisclosure(
                     text = groupLabel(group),
                     expanded = false,
                     showProgress = isRunning && key == activeKey,
-                    onToggle = { showSummary = true },
+                    onToggle = { openKey = key },
                 )
             }
         }
     }
-    if (showSummary) {
+    if (openKey >= 0) {
+        val group = groups.firstOrNull { it.items.first().index == openKey }
         ActivitySummarySheet(
-            items = sheetItems,
-            isRunning = isRunning,
-            onDismiss = { showSummary = false },
+            items = group?.items?.map { it.value } ?: emptyList(),
+            isRunning = isRunning && group == groups.lastOrNull(),
+            onDismiss = { openKey = -1 },
         )
     }
 }
@@ -9197,32 +9208,10 @@ private fun stepTitle(item: ActivityItem): String {
         isReadItem(item) -> "Read $target".trim()
         isSearchItem(item) -> "Searched $target".trim()
         isWebItem(item) -> "Searched the web for $target".trim()
+        isCommandItem(item) && item.description.isNotBlank() -> item.description.trim()
         isCommandItem(item) -> "Ran ${item.detail.trim().trim('`').lineSequence().firstOrNull().orEmpty().take(140)}".trim()
         else -> compactActivityText(item)
     }
-}
-
-/**
- * Everything the agent did in the turn that message [index] belongs to, in order: thinking /
- * narration text and every tool call, so the Summary sheet shows the whole run.
- */
-private fun buildTurnTimeline(messages: List<ChatMessage>, index: Int, turnFinished: Boolean = true): List<ActivityItem> {
-    if (index !in messages.indices) return emptyList()
-    var start = index
-    while (start > 0 && !messages[start - 1].fromUser) start--
-    var end = index
-    while (end + 1 < messages.size && !messages[end + 1].fromUser) end++
-    val out = mutableListOf<ActivityItem>()
-    for (i in start..end) {
-        val m = messages[i]
-        if (m.fromUser) continue
-        out += m.workItems.filter { !it.title.trim().equals("Files changed", ignoreCase = true) }
-        val isFinalReply = turnFinished && i == end
-        if (!isFinalReply && m.text.isNotBlank()) {
-            out += ActivityItem("Think", stripEmojis(m.text).replace("**", "").trim())
-        }
-    }
-    return out
 }
 
 private fun compactActivityText(item: ActivityItem): String = "${activityName(item)} · ${activityDetail(item).replace(Regex("\\s+"), " ").take(105)}"

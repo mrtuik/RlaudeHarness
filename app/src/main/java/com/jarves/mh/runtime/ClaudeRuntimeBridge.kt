@@ -692,7 +692,8 @@ class ClaudeRuntimeBridge(
             }
             else -> input.optString("description").ifBlank { "Running $name" }
         }
-        eventBus.emit(RuntimeEvent.ToolStarted(sessionId, name, sanitizeForDisplay(detail.ifBlank { "Running $name" })))
+        val description = if (name == "Bash") sanitizeForDisplay(input.optString("description")).replace(Regex("\\s+"), " ").trim().take(140) else ""
+        eventBus.emit(RuntimeEvent.ToolStarted(sessionId, name, sanitizeForDisplay(detail.ifBlank { "Running $name" }), description))
         pushForegroundProgress("Running $name · ${detail.replace(Regex("\\s+"), " ").trim().take(80).ifBlank { name }}")
     }
 
