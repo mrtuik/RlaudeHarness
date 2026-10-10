@@ -8535,39 +8535,163 @@ private fun FileActionsMenu(
  * download / share). Tapping the card body (outside the trigger) opens the full
  * code view.
  */
+private enum class ActivityKind { WRITE, EXPLORE, OTHER }
+
+private data class ActivityGroup(
+    val kind: ActivityKind,
+    val items: List<IndexedValue<ActivityItem>>,
+)
+
+private fun activityTaskName(item: ActivityItem): String =
+    item.title.removePrefix("Running ").removeSuffix(" completed").trim()
+
+private fun isThinkItem(item: ActivityItem): Boolean = activityTaskName(item).equals("Think", ignoreCase = true)
+
+private fun isReadItem(item: ActivityItem): Boolean = activityTaskName(item).lowercase() in
+    setOf("read", "view_file", "read_file", "view_file_outline")
+
+private fun isSearchItem(item: ActivityItem): Boolean = activityTaskName(item).lowercase() in
+    setOf("glob", "grep", "grep_search", "find_by_name", "list_dir", "ls")
+
+private fun isWebItem(item: ActivityItem): Boolean = activityTaskName(item).lowercase() in
+    setOf("websearch", "webfetch", "search_web", "read_url_content")
+
+private fun isCommandItem(item: ActivityItem): Boolean = item.isCommand ||
+    activityTaskName(item).lowercase() in setOf("bash", "run_command")
+
+private fun activityKind(item: ActivityItem): ActivityKind = when {
+    isWriteToolName(item.title) -> ActivityKind.WRITE
+    isThinkItem(item) || isReadItem(item) || isSearchItem(item) || isWebItem(item) || isCommandItem(item) -> ActivityKind.EXPLORE
+    else -> ActivityKind.OTHER
+}
+
+/**
+ * Collapses the flat tool-call list into Claude-style summary groups:
+ * consecutive reads/searches/commands/thinking become one "Read 2 files, ran 4 commands" row,
+ * consecutive writes become one "Wrote 3 files" row. Anything else stays as its own row.
+ */
+private fun buildActivityGroups(items: List<ActivityItem>): List<ActivityGroup> {
+    val groups = mutableListOf<ActivityGroup>()
+    items.forEachIndexed { index, item ->
+        val kind = activityKind(item)
+        val last = groups.lastOrNull()
+        if (last != null && kind != ActivityKind.OTHER && last.kind == kind) {
+            groups[groups.lastIndex] = last.copy(items = last.items + IndexedValue(index, item))
+        } else {
+            groups += ActivityGroup(kind, listOf(IndexedValue(index, item)))
+        }
+    }
+    return groups
+}
+
+private fun plural(count: Int, singular: String, pluralForm: String = singular + "s"): String =
+    "$count ${if (count == 1) singular else pluralForm}"
+
+private fun groupLabel(group: ActivityGroup): String {
+    val items = group.items.map { it.value }
+    return when (group.kind) {
+        ActivityKind.WRITE -> {
+            val files = items
+                .map { it.detail.trim().trim('`').let { raw -> if (raw.contains(" · ")) raw.substringAfter(" · ").trim() else raw } }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .size
+                .coerceAtLeast(1)
+            "Wrote ${plural(files, "file")}"
+        }
+        ActivityKind.EXPLORE -> {
+            val parts = buildList {
+                items.count(::isReadItem).takeIf { it > 0 }?.let { add("read ${plural(it, "file")}") }
+                items.count(::isSearchItem).takeIf { it > 0 }?.let { add("searched ${plural(it, "time")}") }
+                items.count(::isWebItem).takeIf { it > 0 }?.let { add("searched the web ${plural(it, "time")}") }
+                items.count(::isCommandItem).takeIf { it > 0 }?.let { add("ran ${plural(it, "command")}") }
+            }
+            if (parts.isEmpty()) "Thought through the request"
+            else parts.joinToString(", ").replaceFirstChar { it.uppercase() }
+        }
+        ActivityKind.OTHER -> compactActivityText(items.first())
+    }
+}
+
 @Composable
 private fun ClaudeActivityDisclosure(
     items: List<ActivityItem>,
     headline: String,
     isRunning: Boolean = false,
 ) {
+    var expandedGroups by rememberSaveable { mutableStateOf(emptyList<Int>()) }
     var expandedItems by rememberSaveable { mutableStateOf(emptyList<Int>()) }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp)) {
+    val groups = remember(items) { buildActivityGroups(items) }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)) {
         if (items.isEmpty()) {
             ActivitySummaryRow(
-                item = null,
                 text = headline,
-                expanded = 0 in expandedItems,
+                expanded = 0 in expandedGroups,
                 showProgress = isRunning,
                 onToggle = {
-                    expandedItems = if (0 in expandedItems) expandedItems - 0 else expandedItems + 0
+                    expandedGroups = if (0 in expandedGroups) expandedGroups - 0 else expandedGroups + 0
                 },
             )
-            if (0 in expandedItems) ActivityExpandedDetail(null, "Reviewing the request and planning the next action.")
+            if (0 in expandedGroups) ActivityExpandedDetail(null, "Reviewing the request and planning the next action.")
         } else {
-            items.forEachIndexed { index, item ->
+            groups.forEach { group ->
+                val key = group.items.first().index
+                val open = key in expandedGroups
                 ActivitySummaryRow(
-                    item = item,
-                    text = compactActivityText(item),
-                    expanded = index in expandedItems,
-                    showProgress = isRunning && !item.isComplete,
+                    text = groupLabel(group),
+                    expanded = open,
+                    showProgress = isRunning && group.items.any { !it.value.isComplete },
                     onToggle = {
-                        expandedItems = if (index in expandedItems) expandedItems - index else expandedItems + index
+                        expandedGroups = if (key in expandedGroups) expandedGroups - key else expandedGroups + key
                     },
                 )
-                if (index in expandedItems) ActivityExpandedDetail(item, activityDetail(item))
+                if (open) {
+                    if (group.kind == ActivityKind.OTHER) {
+                        val item = group.items.first().value
+                        ActivityExpandedDetail(item, activityDetail(item))
+                    } else {
+                        group.items.forEach { (index, item) ->
+                            ActivitySubRow(
+                                item = item,
+                                expanded = index in expandedItems,
+                                onToggle = {
+                                    expandedItems = if (index in expandedItems) expandedItems - index else expandedItems + index
+                                },
+                            )
+                            if (index in expandedItems) ActivityExpandedDetail(item, activityDetail(item))
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+/** One tool call inside an expanded group: small icon + one-line summary, tap for full detail. */
+@Composable
+private fun ActivitySubRow(
+    item: ActivityItem,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(activityIcon(item), null, Modifier.size(14.dp), tint = muted.copy(alpha = 0.8f))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            compactActivityText(item),
+            Modifier.weight(1f),
+            fontSize = 12.5.sp,
+            color = muted.copy(alpha = 0.85f),
+            maxLines = if (expanded) 3 else 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -8703,48 +8827,41 @@ private fun AnimatedThinkingDots(
 
 @Composable
 private fun ActivitySummaryRow(
-    item: ActivityItem?,
     text: String,
     expanded: Boolean,
     showProgress: Boolean,
     onToggle: () -> Unit,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    // Every step (Think, Task stopped, Write, Read, Web search, Bash, ...) gets the same
-    // outlined box around its row, with a near-square corner radius.
-    val outlineShape = RoundedCornerShape(2.dp)
-    val rowModifier = Modifier.fillMaxWidth().clickable(onClick = onToggle)
-    val content: @Composable () -> Unit = {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                activityIcon(item),
-                null,
-                Modifier.size(16.dp),
-                tint = muted,
-            )
-            Spacer(Modifier.width(9.dp))
-            Text(text, Modifier.weight(1f), fontSize = 13.sp, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (showProgress) {
-                AnimatedThinkingDots(dotColor = muted)
-                Spacer(Modifier.width(6.dp))
-            }
-            Icon(
-                if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                if (expanded) "Collapse activity" else "Expand activity",
-                Modifier.size(18.dp),
-                tint = muted,
-            )
+    val chevronRotation by animateFloatAsState(if (expanded) 90f else 0f, label = "activity_chevron")
+    // Claude-style: plain muted text with a small chevron right after it. No box, no leading icon.
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 6.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text,
+            Modifier.weight(1f, fill = false),
+            fontSize = 14.sp,
+            color = muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.width(4.dp))
+        if (showProgress) {
+            AnimatedThinkingDots(dotColor = muted)
+            Spacer(Modifier.width(4.dp))
         }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            if (expanded) "Collapse activity" else "Expand activity",
+            Modifier.size(18.dp).rotate(chevronRotation),
+            tint = muted,
+        )
     }
-    Surface(
-        modifier = rowModifier.padding(vertical = 3.dp),
-        shape = outlineShape,
-        color = Color.Transparent,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) { content() }
 }
 
 @Composable
