@@ -4685,7 +4685,6 @@ private fun WorkspaceScreen(
                             tint = Color.Black,
                         )
                     }
-                    if (state.isRunning) CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
             )
@@ -6532,6 +6531,25 @@ private fun ChatTab(
                                             )
                                         }
                                     }
+                                    Row(
+                                        modifier = Modifier
+                                            .clickable { onDownloadZip(turnChangedPaths, "$projectSlug-changes.zip") }
+                                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(R.drawable.ic_custom_zip),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            "Download changed files as zip",
+                                            fontSize = 14.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -8213,14 +8231,6 @@ private fun WorkBlockCard(
     onOpenChangedFile: (String) -> Unit = {},
 ) {
     val seconds = (message.workedMillis / 1_000L).coerceAtLeast(1L)
-    val changedPaths = remember(message.id, message.workItems, message.changedFiles) {
-        extractTurnChangedPaths(message)
-    }
-    val changedFileNames = remember(changedPaths) {
-        changedPaths.map { it.substringAfterLast('/') }.distinct()
-    }
-    var isExpanded by rememberSaveable(message.id) { mutableStateOf(false) }
-
     Column {
         ClaudeActivityDisclosure(
             items = message.workItems,
@@ -8231,90 +8241,8 @@ private fun WorkBlockCard(
                 text = "Worked for ${formatDuration(seconds)}",
                 modifier = Modifier.padding(start = 29.dp, bottom = 6.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
             )
-        }
-        if (changedFileNames.isNotEmpty()) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 2.dp)
-                    .clickable { isExpanded = !isExpanded },
-                shape = RoundedCornerShape(2.dp),
-                color = Color.White,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_custom_file),
-                        contentDescription = null,
-                        modifier = Modifier.size(17.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "Files changed (${changedFileNames.size})",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            changedFileNames.joinToString(", "),
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Icon(
-                        if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                        contentDescription = if (isExpanded) "Collapse summary" else "Expand summary",
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            if (isExpanded) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 4.dp, end = 4.dp, top = 2.dp, bottom = 4.dp),
-                    shape = RoundedCornerShape(2.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                        changedPaths.forEach { path ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth().clickable { onOpenChangedFile(path) }.padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    painter = painterResource(
-                                        if (path.endsWith(".zip", ignoreCase = true)) R.drawable.ic_custom_zip else R.drawable.ic_custom_file
-                                    ),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = path,
-                                    fontSize = 11.5.sp,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -8384,7 +8312,7 @@ private fun PerFileChangeCard(
         Column(Modifier.weight(1f)) {
             Text(
                 text = fileName,
-                fontSize = 13.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
                 color = Color.Black,
                 maxLines = 1,
@@ -8392,7 +8320,7 @@ private fun PerFileChangeCard(
             )
             Text(
                 text = typeLabel,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -8589,13 +8517,18 @@ private fun groupLabel(group: ActivityGroup): String {
     val items = group.items.map { it.value }
     return when (group.kind) {
         ActivityKind.WRITE -> {
-            val files = items
+            val names = items
                 .map { it.detail.trim().trim('`').let { raw -> if (raw.contains(" · ")) raw.substringAfter(" · ").trim() else raw } }
                 .filter { it.isNotBlank() }
+                .map { it.substringAfterLast('/') }
                 .distinct()
-                .size
-                .coerceAtLeast(1)
-            "Wrote ${plural(files, "file")}"
+            when {
+                names.isEmpty() -> "Edited ${plural(items.size.coerceAtLeast(1), "file")}"
+                names.size == 1 -> "Edited ${names[0]}"
+                names.size == 2 -> "Edited ${names[0]} and ${names[1]}"
+                names.size == 3 -> "Edited ${names[0]}, ${names[1]} and ${names[2]}"
+                else -> "Edited ${names.size} files"
+            }
         }
         ActivityKind.EXPLORE -> {
             val parts = buildList {
@@ -8632,13 +8565,14 @@ private fun ClaudeActivityDisclosure(
             )
             if (0 in expandedGroups) ActivityExpandedDetail(null, "Reviewing the request and planning the next action.")
         } else {
+            val activeKey = groups.lastOrNull()?.items?.first()?.index
             groups.forEach { group ->
                 val key = group.items.first().index
                 val open = key in expandedGroups
                 ActivitySummaryRow(
                     text = groupLabel(group),
                     expanded = open,
-                    showProgress = isRunning && group.items.any { !it.value.isComplete },
+                    showProgress = isRunning && key == activeKey,
                     onToggle = {
                         expandedGroups = if (key in expandedGroups) expandedGroups - key else expandedGroups + key
                     },
@@ -8685,7 +8619,7 @@ private fun ActivitySubRow(
         Text(
             compactActivityText(item),
             Modifier.weight(1f),
-            fontSize = 12.5.sp,
+            fontSize = 13.5.sp,
             color = muted.copy(alpha = 0.85f),
             maxLines = if (expanded) 3 else 1,
             overflow = TextOverflow.Ellipsis,
@@ -8872,7 +8806,7 @@ private fun ActivitySummaryRow(
         Text(
             text,
             Modifier.weight(1f, fill = false),
-            fontSize = 14.sp,
+            fontSize = 15.sp,
             color = muted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -8922,7 +8856,7 @@ private fun ActivityExpandedDetail(item: ActivityItem?, detail: String) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 25.dp, end = 8.dp, bottom = 4.dp),
-            fontSize = 10.5.sp,
+            fontSize = 11.5.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -8932,8 +8866,8 @@ private fun ActivityExpandedDetail(item: ActivityItem?, detail: String) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 25.dp, end = 8.dp, bottom = 8.dp),
-            fontSize = 12.sp,
-            lineHeight = 17.sp,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontFamily = FontFamily.Monospace,
         )

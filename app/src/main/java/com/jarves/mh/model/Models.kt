@@ -198,16 +198,15 @@ fun projectSlug(name: String): String {
 
 data class QuickChatIdentity(val displayName: String, val slug: String)
 
+/** Sequential quick-project names: "Project 01", "Project 02", ... (next number after the highest used). */
 fun generateQuickChatIdentity(usedSlugs: Set<String>, random: Random = Random.Default): QuickChatIdentity {
-    val adjectives = listOf("bright", "calm", "clever", "curious", "gentle", "nimble", "quiet", "swift", "wise", "bold")
-    val pioneers = listOf("turing", "lovelace", "hopper", "tesla", "curie", "ramanujan", "bose", "kalam", "faraday", "darwin")
-    repeat(20) {
-        val base = "${adjectives.random(random)}-${pioneers.random(random)}"
-        if (base !in usedSlugs) return QuickChatIdentity(base.toDisplayName(), base)
-    }
-    val base = "${adjectives.random(random)}-${pioneers.random(random)}"
-    val slug = generateSequence(2) { it + 1 }.map { "$base-$it" }.first { it !in usedSlugs }
-    return QuickChatIdentity(slug.toDisplayName(), slug)
+    val highest = usedSlugs
+        .mapNotNull { Regex("^project-(\\d+)$").matchEntire(it)?.groupValues?.get(1)?.toIntOrNull() }
+        .maxOrNull() ?: 0
+    var next = highest + 1
+    while ("project-${"%02d".format(next)}" in usedSlugs) next++
+    val number = "%02d".format(next)
+    return QuickChatIdentity("Project $number", "project-$number")
 }
 
 private fun String.toDisplayName(): String = split('-').joinToString(" ") { word ->
